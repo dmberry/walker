@@ -154,7 +154,7 @@
 CLICK strike   SPACE jump
 E interact   V wave   H take a hit   X die
 SHIFT costs stamina; health returns once nothing has hit you
-L shading   K skip 3h   T clock speed / hold   G grid   R reset
+L shading   K skip 3h   T clock speed / hold   G grid   SHIFT+R reset
 M mute wind   8 9 wind level   I about
 , . walk pace   SHIFT , . run pace</div>
 <div id="err" hidden></div>
@@ -1364,6 +1364,33 @@ const siteTex = (file) => {
 const TEX_CONCRETE = siteTex('concrete.jpg');
 const TEX_HAZARD = siteTex('hazard.jpg');
 
+// The slab photograph was taken in shade and arrives dark. Brightening it
+// through a canvas is the honest fix: a material colour can only ever darken it
+// further, and an emissive term would make the yard glow at night — the mistake
+// the path stones already taught. Used directly rather than cloned, so the
+// redraw when the image lands reaches the texture the apron is holding.
+const TEX_SLAB = (() => {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 8;
+  const t = new THREE.CanvasTexture(cv);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const img = new Image();
+  img.onload = () => {
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const c = cv.getContext('2d');
+    // Source mean is 103; this lands it near 190, which reads as poured
+    // concrete in daylight rather than the wet grey it was photographed as.
+    c.filter = 'brightness(1.9) saturate(0.8)';
+    c.drawImage(img, 0, 0);
+    t.needsUpdate = true;
+  };
+  img.src = '../assets/site/slab.jpg';
+  return t;
+})();
+
 function buildDatacentre() {
   const g = new THREE.Group();
   const clad = (tex, w, h, d, col, tile) => {
@@ -1396,7 +1423,16 @@ function buildDatacentre() {
   const W = DC.w, D = DC.d, H = DC.h;
 
   // The apron it stands on, a hand's breadth above the levelled ground.
-  put(box(W + 26, 0.35, D + 26, 0x8a8b86), 0, 0.17, 0, false);
+  // The apron, in real paving slabs. The photograph has grass down both sides,
+  // so it is cropped to the concrete before use; the joint line that survives
+  // the crop then repeats as a course, which is what a slab field looks like.
+  {
+    TEX_SLAB.repeat.set((W + 26) / 2.4, (D + 26) / 2.4);
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(W + 26, 0.35, D + 26),
+      new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }));
+    put(m, 0, 0.17, 0, false);
+  }
   // Plinth, then the hall.
   put(box(W + 2.4, 1.4, D + 2.4, 0x63666a), 0, 0.9, 0, false);
   put(box(W, H, D, 0x9aa0a4), 0, 1.6 + H / 2, 0);
@@ -1460,34 +1496,94 @@ function buildDatacentre() {
   // plate is a few hundred bytes of code where geometry would be a font
   // pipeline, and at this distance it is the same picture. Kept on the two
   // faces the isometric camera can see, which are south and east.
+  // The plate is the hazard panel, dimmed enough that the lettering still
+  // carries. The image is not loaded when the canvas is first drawn, so each
+  // sign registers a redraw and repaints itself when the file arrives.
+  const signImg = new Image();
+  const signRedraw = [];
+  signImg.onload = () => { for (const fn of signRedraw) fn(); };
+  signImg.src = '../assets/site/hazard.jpg';
+
   const signTex = (text, w, h) => {
     const cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
     const c = cv.getContext('2d');
-    c.fillStyle = '#20262c';
-    c.fillRect(0, 0, w, h);
-    // A hairline surround, the way a fixed panel has an edge.
-    c.strokeStyle = 'rgba(255,255,255,0.13)';
-    c.lineWidth = Math.max(2, h * 0.018);
-    c.strokeRect(c.lineWidth, c.lineWidth, w - c.lineWidth * 2, h - c.lineWidth * 2);
-    c.fillStyle = '#e8eef2';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.font = '600 ' + Math.round(h * 0.40) + 'px ui-sans-serif, Helvetica, Arial, sans-serif';
-    // Letter-spaced by hand, because corporate signage always is and because
-    // canvas letterSpacing is not everywhere yet.
-    const sp = h * 0.055;
-    const chars = [...text];
-    const width = chars.reduce((a, ch) => a + c.measureText(ch).width + sp, -sp);
-    let x = w / 2 - width / 2;
-    for (const ch of chars) {
-      const cw = c.measureText(ch).width;
-      c.fillText(ch, x + cw / 2, h * 0.52);
-      x += cw + sp;
-    }
+
+    const draw = () => {
+      if (signImg.complete && signImg.naturalWidth) {
+        const tile = h * 0.9;
+        for (let x = 0; x < w; x += tile) c.drawImage(signImg, x, 0, tile, tile);
+        for (let x = 0; x < w; x += tile) c.drawImage(signImg, x, tile, tile, tile);
+        // Down, so the letters have somewhere to sit.
+        c.fillStyle = 'rgba(18, 22, 27, 0.62)';
+        c.fillRect(0, 0, w, h);
+      } else {
+        c.fillStyle = '#20262c';
+        c.fillRect(0, 0, w, h);
+      }
+      c.strokeStyle = 'rgba(255,255,255,0.16)';
+      c.lineWidth = Math.max(2, h * 0.018);
+      c.strokeRect(c.lineWidth, c.lineWidth, w - c.lineWidth * 2, h - c.lineWidth * 2);
+
+      // FIT THE NAME TO THE PLATE. Letter-spacing is added after measuring, so
+      // a name that fits at the nominal size can still run off both ends once
+      // it is spaced — which is what took the N off NEOCLOUD. Measure with the
+      // spacing in, then shrink until it sits inside its own border.
+      const chars = [...text];
+      let size = h * 0.40, sp, width;
+      for (let pass = 0; pass < 12; pass++) {
+        c.font = '600 ' + Math.round(size) + 'px ui-sans-serif, Helvetica, Arial, sans-serif';
+        sp = size * 0.14;
+        width = chars.reduce((a, ch) => a + c.measureText(ch).width + sp, -sp);
+        if (width <= w * 0.90) break;
+        size *= (w * 0.90) / width;
+      }
+
+      // The letters carry the panel's own texture, so they weather with it
+      // rather than sitting on top looking freshly applied. Drawn to their own
+      // canvas and the metal punched through them with source-in.
+      const lc = document.createElement('canvas');
+      lc.width = w; lc.height = h;
+      const l = lc.getContext('2d');
+      l.font = c.font;
+      l.textAlign = 'center';
+      l.textBaseline = 'middle';
+      l.fillStyle = '#ffffff';
+      let x = w / 2 - width / 2;
+      for (const ch of chars) {
+        const cw = l.measureText(ch).width;
+        l.fillText(ch, x + cw / 2, h * 0.52);
+        x += cw + sp;
+      }
+      l.globalCompositeOperation = 'source-in';
+      if (signImg.complete && signImg.naturalWidth) {
+        l.filter = 'brightness(2.6) saturate(0.42)';
+        const tile = h * 0.9;
+        for (let tx = 0; tx < w; tx += tile) {
+          l.drawImage(signImg, tx, 0, tile, tile);
+          l.drawImage(signImg, tx, tile, tile, tile);
+        }
+        l.filter = 'none';
+      } else {
+        l.fillStyle = '#f2f6f8';
+        l.fillRect(0, 0, w, h);
+      }
+      l.globalCompositeOperation = 'source-over';
+
+      // A drop shadow under the whole word, because a painted plate behind the
+      // letters is busier than a flat one and the name has to read first.
+      c.shadowColor = 'rgba(0,0,0,0.85)';
+      c.shadowBlur = h * 0.05;
+      c.shadowOffsetY = h * 0.014;
+      c.drawImage(lc, 0, 0);
+      c.shadowColor = 'transparent';
+    };
+
+    draw();
     const t = new THREE.CanvasTexture(cv);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    signRedraw.push(() => { draw(); t.needsUpdate = true; });
     return t;
   };
 
@@ -1498,16 +1594,23 @@ function buildDatacentre() {
   });
 
   const NAME = 'NEOCLOUD DATA SOLUTIONS';
-  const southMat = signMat(NAME, 2048, 260);
-  const south = new THREE.Mesh(new THREE.PlaneGeometry(62, 7.9), southMat);
-  south.position.set(0, 1.6 + H * 0.62, D / 2 + 0.35);
+  // SIZED TO BE READ IN ONE VIEW. At the default zoom the orthographic camera
+  // covers about 39 m of world, so a 62 m sign can never be seen whole however
+  // clear the letters are. 34 m fits, and a name you can read is worth more than
+  // a name that fills the wall.
+  const southMat = signMat(NAME, 2048, 300);
+  const south = new THREE.Mesh(new THREE.PlaneGeometry(34, 5.0), southMat);
+  // PROUD OF THE PILASTERS. The flank ribs stand 0.7 m off the wall, so a sign
+  // at 0.35 sits inside them and they cut the name into pieces — which is what
+  // was happening. It hangs off the face, the way a fixed sign does.
+  south.position.set(0, 1.6 + H * 0.62, D / 2 + 0.95);
   south.receiveShadow = true;
   g.add(south);
 
-  const eastMat = signMat(NAME, 1536, 260);
-  const east = new THREE.Mesh(new THREE.PlaneGeometry(31, 5.2), eastMat);
+  const eastMat = signMat(NAME, 1536, 300);
+  const east = new THREE.Mesh(new THREE.PlaneGeometry(30, 5.9), eastMat);
   east.rotation.y = Math.PI / 2;
-  east.position.set(W / 2 + 0.35, 1.6 + H * 0.62, 0);
+  east.position.set(W / 2 + 0.55, 1.6 + H * 0.62, 0);
   east.receiveShadow = true;
   g.add(east);
 
@@ -1822,6 +1925,11 @@ addEventListener('mousedown', armWind, { once: true });
 const held = new Set();
 let stance = 'none';            // none | sword | gun
 addEventListener('keydown', e => {
+  // COMMAND-R IS A RELOAD, NOT A KEY PRESS. The browser sends a plain keydown
+  // for 'r' with the meta bit set, and reset used to fire on it — so every
+  // refresh wiped the save on the way out. Nothing here should answer to a
+  // modified key; those belong to the browser and the system.
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
   held.add(k);
   if (k === '[') azi -= Math.PI / 4;
@@ -1831,7 +1939,8 @@ addEventListener('keydown', e => {
   if (k === 'p') ortho = !ortho;
   if (k === 'g') grid.visible = !grid.visible;
   if (k === 'm') muted = !muted;
-  if (k === 'r') resetToStart();
+  // And reset wants intent, so it takes SHIFT with it.
+  if (k === 'r' && e.shiftKey) resetToStart();
   if (k === 'i' || k === 'escape') about.classList.toggle('open', k === 'i' ? !about.classList.contains('open') : false);
   if (k === '8') windVol = Math.max(0, +(windVol - 0.15).toFixed(2));
   if (k === '9') windVol = Math.min(3, +(windVol + 0.15).toFixed(2));
@@ -2300,6 +2409,12 @@ function restore(st) {
   if (typeof st.azi === 'number') azi = st.azi;
   if (typeof st.ortho === 'boolean') ortho = st.ortho;
   pendingYaw = typeof st.yaw === 'number' ? st.yaw : null;
+  // AND THE CAMERA WITH HIM. The target eases toward the body every frame, so
+  // restoring the position and not the target left the view starting at the
+  // origin and sliding a hundred metres across the landscape to catch up.
+  target.set(pos.x, pos.y + 1.0, pos.z);
+  aim();
+  renderer.shadowMap.needsUpdate = true;
   applyLight();
 }
 

@@ -1,9 +1,11 @@
 concrete.jpg  from nostos assets/textures/floor-road.jpg, resampled to 512
 floor.jpg     from nostos assets/textures/misc-ring-bottoms.jpg
 hazard.jpg    from nostos assets/textures/panel-metal-1.jpg
+slab.jpg      from nostos assets/textures/photo-unsorted-1.jpg, centre-cropped to
+              1200x1200 to take the grass off both edges, then resampled to 512
 
 Both CC0, David M. Berry's own work.
 
-concrete.jpg clads the datacentre. floor.jpg is tiled into the ground canvas
+concrete.jpg clads the datacentre and slab.jpg paves its apron. floor.jpg is tiled into the ground canvas
 for the yard. hazard.jpg is used sparingly, as a
 band on the plant at ground level.
