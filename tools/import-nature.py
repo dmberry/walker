@@ -25,6 +25,11 @@ WANTED = [
     'Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3',
     'Pebble_Round_1', 'Pebble_Round_2', 'Pebble_Square_1',
     'Bush_Common', 'Grass_Common_Tall', 'Fern_1',
+    # stepping stones, for laying along the trails
+    'RockPath_Round_Small_1', 'RockPath_Round_Small_2', 'RockPath_Round_Small_3',
+    'RockPath_Round_Thin', 'RockPath_Round_Wide',
+    'RockPath_Square_Small_1', 'RockPath_Square_Small_2', 'RockPath_Square_Small_3',
+    'RockPath_Square_Thin', 'RockPath_Square_Wide',
 ]
 
 if not SRC.is_dir():

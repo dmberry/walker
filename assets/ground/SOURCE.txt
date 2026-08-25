@@ -1,0 +1,6 @@
+grass.jpg   from nostos assets/textures/floor-grass.jpg
+dirt.jpg    from nostos assets/textures/floor-dirt.jpg, resampled to 512
+
+Both CC0, David M. Berry's own work. Tiled as a detail map over the world-space
+ground canvas; see groundTexture() and the detail-map patch in
+tools/world-preview.html.

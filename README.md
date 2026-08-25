@@ -216,8 +216,9 @@ into `assets/`**. The four Quaternius kits together are about 670 MB on disk;
 the game reads roughly six of it.
 
 ```
-assets/props/    the 15 Survival Pack props the camp and the hands use, plus Pistol_1
-assets/nature/   19 of the Stylized Nature MegaKit's 68 models, textures at 512
+assets/props/    the 13 Survival Pack props the camp and the hands use, plus Pistol_1
+assets/nature/   29 of the Stylized Nature MegaKit's 68 models, textures at 512
+assets/ground/   grass and dirt, CC0, David M. Berry's own. See SOURCE.txt
 models/          adventurer-m.glb
 _tmp/            every pack in full. Nothing here ships.
 ```

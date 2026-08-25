@@ -194,7 +194,13 @@ applyLight();
 
 // Deterministic, so the same field comes back on every reload and a change
 // you make is the only thing that moved.
-const rand = (() => { let s = 20260825; return () => (s = s * 16807 % 2147483647) / 2147483647; })();
+// TWO GENERATORS, NOT ONE. Sharing a single sequence meant that changing the
+// number of ellipses in the ground texture moved every tree in the world, since
+// the scatter read whatever came next. They are separate streams now, so
+// retuning one leaves the other exactly where it was.
+const makeRand = (seed) => { let s = seed; return () => (s = s * 16807 % 2147483647) / 2147483647; };
+const rand = makeRand(20260825);        // the ground canvas
+const scatter = makeRand(19940417);     // where things stand
 
 // ----------------------------------------------------------------- terrain --
 // Value noise, three octaves, written out rather than imported: it is a hash, a
@@ -293,6 +299,42 @@ const LOOKAHEAD = 0.55;
 // do not need a run-up.
 const STEP_UP = 0.45;
 
+// SOLID THINGS. A trunk is a post, not a canopy: the tree's collision radius has
+// nothing to do with how wide its branches are, and using the canopy would stop
+// him a stride and a half short of every tree. Undergrowth is not in here at
+// all — you walk through a fern.
+const PLAYER_R = 0.34;
+
+// A BLOCKER HAS A TOP. Without one everything solid is an infinite wall and a
+// jump is only ever a hop on the spot; with one, a log and a gas can are things
+// to clear and a tree is not. The apex is v^2/2g = 7.6^2/48, about 1.2 m, so
+// that is the line between the two by construction rather than by a list.
+const blockers = [];
+function blocked(x, z, feetY) {
+  for (let i = 0; i < blockers.length; i++) {
+    const b = blockers[i];
+    if (feetY !== undefined && feetY >= b.top) continue;   // over the top of it
+    const rr = b.r + PLAYER_R;
+    if ((x - b.x) ** 2 + (z - b.z) ** 2 < rr * rr) return true;
+  }
+  return false;
+}
+
+// Landing on top of something and then finding every direction refused is the
+// stuck problem again, so a landing that ends up inside a blocker is pushed out
+// to its edge rather than left there.
+function shoveClear() {
+  for (const b of blockers) {
+    const rr = b.r + PLAYER_R;
+    const dx = pos.x - b.x, dz = pos.z - b.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= rr * rr) continue;
+    const d = Math.sqrt(d2) || 1e-4;
+    pos.x = b.x + dx / d * rr * 1.02;
+    pos.z = b.z + dz / d * rr * 1.02;
+  }
+}
+
 // ------------------------------------------------------------------ tracks --
 // PAINTED INTO THE GROUND, NOT LAID OVER IT. The first version was a ribbon of
 // quads floating 5 cm above the surface, and it vanished: its quads are wider
@@ -377,15 +419,26 @@ function groundTexture() {
 
   g.fillStyle = '#6f8f4e';
   g.fillRect(0, 0, N, N);
-  for (let i = 0; i < 1500; i++) {
-    const r = (2 + rand() * 9) * P;
-    g.fillStyle = 'hsla(' + (78 + rand() * 26) + ',' + (24 + rand() * 20) + '%,' + (38 + rand() * 26) + '%,0.5)';
+
+  // THIS LAYER LOST ITS JOB. It was carrying all the variation the ground had,
+  // so it was drawn strong — and at half a metre to the pixel the ellipses read
+  // as exactly what they are, a scatter of green discs. The tiled grass now does
+  // the close texture, so all this has to do is vary the tone slowly across the
+  // field: many fewer, much larger, barely there, and staying near the base
+  // hue instead of ranging across the greens.
+  for (let i = 0; i < 260; i++) {
+    const r = (14 + rand() * 34) * P;
+    g.fillStyle = 'hsla(' + (84 + rand() * 14) + ',' + (26 + rand() * 12) + '%,'
+                + (40 + rand() * 14) + '%,0.10)';
     g.beginPath();
-    g.ellipse(rand() * N, rand() * N, r, r * (0.55 + rand() * 0.6), rand() * 3.14, 0, 6.29);
+    g.ellipse(rand() * N, rand() * N, r, r * (0.6 + rand() * 0.7), rand() * 3.14, 0, 6.29);
     g.fill();
   }
-  for (let i = 0; i < 42000; i++) {
-    g.fillStyle = 'rgba(' + (30 + rand() * 60 | 0) + ',' + (50 + rand() * 60 | 0) + ',' + (20 + rand() * 40 | 0) + ',0.30)';
+  // Grain, kept because it stops the large shapes banding, and taken right down
+  // because the detail map covers this scale far better than the canvas can.
+  for (let i = 0; i < 26000; i++) {
+    g.fillStyle = 'rgba(' + (40 + rand() * 55 | 0) + ',' + (60 + rand() * 55 | 0) + ','
+                + (28 + rand() * 38 | 0) + ',0.12)';
     g.fillRect(rand() * N, rand() * N, 1 + rand() * 3, 1 + rand() * 3);
   }
 
@@ -509,6 +562,38 @@ function groundTexture() {
 }
 
 const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: groundTexture() });
+
+// TWO SCALES, TWO TEXTURES. The world-space canvas carries where things are —
+// the mottling, and the chalk of the paths — but at 2048 across 240 metres it
+// has 8.5 pixels to the metre, which is nowhere near enough to look like grass
+// underfoot. So a second, tiled texture supplies the close detail, multiplied
+// in as brightness only: the canvas keeps saying what colour the ground is
+// there, and the grass only says how rough it is.
+const detailTex = new THREE.TextureLoader().load('../assets/ground/grass.jpg');
+detailTex.wrapS = detailTex.wrapT = THREE.RepeatWrapping;
+detailTex.colorSpace = THREE.SRGBColorSpace;
+detailTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+const DETAIL_TILE = 3.0;        // metres per repeat
+groundMat.onBeforeCompile = (sh) => {
+  sh.uniforms.detailMap = { value: detailTex };
+  sh.uniforms.detailRepeat = { value: WORLD / DETAIL_TILE };
+  sh.uniforms.detailStrength = { value: 0.85 };
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec2 vGroundUv;')
+    .replace('#include <uv_vertex>', '#include <uv_vertex>\n\tvGroundUv = uv;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>',
+      '#include <common>\nuniform sampler2D detailMap;\nuniform float detailRepeat;\n'
+      + 'uniform float detailStrength;\nvarying vec2 vGroundUv;')
+    .replace('#include <map_fragment>',
+      '#include <map_fragment>\n'
+      // Luminance around its own middle, so the detail adds contrast without
+      // dragging the whole ground darker or greener than the canvas painted it.
+      + '\tvec3 dTex = texture2D(detailMap, vGroundUv * detailRepeat).rgb;\n'
+      + '\tfloat dLum = dot(dTex, vec3(0.299, 0.587, 0.114));\n'
+      + '\tdiffuseColor.rgb *= 1.0 + (dLum - 0.42) * detailStrength;');
+};
 const groundGeo = new THREE.PlaneGeometry(240, 240, 288, 288);
 {
   // The mesh is turned -90° about X, so a local (x, y) lands at world (x, -y)
@@ -616,7 +701,13 @@ async function loadProp(name, dir = PROP_DIR) {
 
 // Props arrive at whatever size Blender left them, so each is normalised to a
 // height in metres and dropped so its lowest vertex sits on the ground.
-function place(obj, x, z, height, yaw = 0) {
+// Collision radii in metres, set by eye. Derived from the bounding box the tent
+// came out at 3.18 m, because the box takes in its guy ropes, and he could not
+// get within a stride and a half of it. Anything not named here is scenery you
+// walk over.
+const SOLID = { Tent: 1.15, Bonfire: 0.5, PropaneTank: 0.26, WoodLog: 0.28 };
+
+function place(obj, x, z, height, yaw = 0, solid = 0) {
   const box = new THREE.Box3().setFromObject(obj);
   const size = new THREE.Vector3();
   box.getSize(size);
@@ -625,6 +716,7 @@ function place(obj, x, z, height, yaw = 0) {
   obj.position.set(x, heightAt(x, z) - box.min.y * s, z);
   obj.rotation.y = yaw;
   scene.add(obj);
+  if (solid) blockers.push({ x, z, r: solid, top: obj.position.y + size.y * s });
   return obj;
 }
 
@@ -647,6 +739,10 @@ const TREE_MODELS = ['Pine_1', 'Pine_2', 'Pine_3', 'Pine_4', 'Pine_5',
 const ROCK_MODELS = ['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3',
                      'Pebble_Round_1', 'Pebble_Round_2', 'Pebble_Square_1'];
 const UNDER_MODELS = ['Bush_Common', 'Fern_1', 'Grass_Common_Tall'];
+const PATH_MODELS = ['RockPath_Round_Small_1', 'RockPath_Round_Small_2', 'RockPath_Round_Small_3',
+                     'RockPath_Round_Thin', 'RockPath_Round_Wide',
+                     'RockPath_Square_Small_1', 'RockPath_Square_Small_2', 'RockPath_Square_Small_3',
+                     'RockPath_Square_Thin', 'RockPath_Square_Wide'];
 
 const natureCache = new Map();
 function loadNature(name) {
@@ -672,23 +768,38 @@ function loadNature(name) {
 
 // Dropped so its lowest point sits on the ground and scaled to a height in
 // metres, the same treatment the camp props get.
-function plant(src, x, z, height, yaw) {
+// FIT BY HEIGHT OR BY WIDTH, and the difference matters more than it sounds.
+// Scaling a FLAT thing to a height blows its footprint up: a stepping stone
+// 0.2 m "tall" whose model is ten times wider than it is thick arrives two
+// metres across. Stones and slabs are fitted by their width instead.
+function plant(src, x, z, target, yaw, opts = {}) {
   const obj = src.clone(true);
   const box = new THREE.Box3().setFromObject(obj);
   const size = new THREE.Vector3();
   box.getSize(size);
-  const s = height / (size.y || 1);
+  const s = opts.fit === 'width'
+    ? target / (Math.max(size.x, size.z) || 1)
+    : target / (size.y || 1);
   obj.scale.setScalar(s);
   obj.position.set(x, heightAt(x, z) - box.min.y * s, z);
   obj.rotation.y = yaw;
   scene.add(obj);
+  // The NARROW horizontal dimension, not the wide one: a bounding box takes in
+  // guy ropes and overhanging branches, and a blocker drawn round those stops
+  // him a stride short of everything.
+  const top = obj.position.y + size.y * s;
+  if (opts.solid === 'footprint') {
+    blockers.push({ x, z, r: Math.min(Math.min(size.x, size.z) * s * 0.45, 1.1), top });
+  } else if (typeof opts.solid === 'number') {
+    blockers.push({ x, z, r: opts.solid, top });
+  }
   return obj;
 }
 
 const canopies = [];
 let sceneryCount = 0;
 
-Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS])].map(
+Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PATH_MODELS])].map(
   n => loadNature(n).then(o => [n, o]).catch(() => { fail('nature missing: ' + n); return null; })
 )).then(loaded => {
   const lib = new Map(loaded.filter(Boolean));
@@ -698,42 +809,76 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS])].map(
   // two trunks under it. Rejection sampling against what is already down keeps
   // them apart at a spacing that scales with how big each one is.
   for (let tries = 0; tries < 6000 && canopies.length < 34; tries++) {
-    const a = rand() * Math.PI * 2, d = 10 + rand() * 46;
+    const a = scatter() * Math.PI * 2, d = 15 + scatter() * 42;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
     if (onTrack(x, z, 2.0)) continue;
-    const h = 5.6 + rand() * 4.2;
+    const h = 5.6 + scatter() * 4.2;
     const r = h * 0.24;
     let clear = true;
     for (const c of canopies) {
       if ((x - c.x) ** 2 + (z - c.z) ** 2 < ((r + c.r) * 0.95) ** 2) { clear = false; break; }
     }
     if (!clear) continue;
-    const src = lib.get(TREE_MODELS[(rand() * TREE_MODELS.length) | 0]);
+    const src = lib.get(TREE_MODELS[(scatter() * TREE_MODELS.length) | 0]);
     if (!src) continue;
     canopies.push({ x, z, r });
-    plant(src, x, z, h, rand() * Math.PI * 2);
+    // The trunk, not the canopy: a fraction of the tree's height, which is
+    // near enough for every model in the kit.
+    plant(src, x, z, h, scatter() * Math.PI * 2, { solid: Math.max(0.20, h * 0.045) });
     sceneryCount++;
   }
 
   for (let i = 0; i < 46; i++) {
-    const a = rand() * Math.PI * 2, d = 5 + rand() * 48;
+    const a = scatter() * Math.PI * 2, d = 9 + scatter() * 46;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
     if (onTrack(x, z, 0.9)) continue;
     if (canopies.some(c => (x - c.x) ** 2 + (z - c.z) ** 2 < (c.r * 0.5) ** 2)) continue;
-    const src = lib.get(ROCK_MODELS[(rand() * ROCK_MODELS.length) | 0]);
+    const src = lib.get(ROCK_MODELS[(scatter() * ROCK_MODELS.length) | 0]);
     if (!src) continue;
-    plant(src, x, z, 0.28 + rand() * 0.85, rand() * Math.PI * 2);
+    plant(src, x, z, 0.28 + scatter() * 0.85, scatter() * Math.PI * 2, { solid: 'footprint' });
     sceneryCount++;
+  }
+
+  // STEPPING STONES. The kit ships ten RockPath pieces and the game already has
+  // trails for them to sit on, so the paths get real geometry instead of only
+  // paint. Not the whole length — a path is worn stone where the ground needed
+  // it and bare chalk where it did not.
+  const STONES = ['RockPath_Round_Small_1', 'RockPath_Round_Small_2', 'RockPath_Round_Small_3',
+                  'RockPath_Round_Thin', 'RockPath_Round_Wide',
+                  'RockPath_Square_Small_1', 'RockPath_Square_Small_2', 'RockPath_Square_Small_3',
+                  'RockPath_Square_Thin', 'RockPath_Square_Wide'];
+  for (const pts of TRACKS) {
+    let laid = false, run = 0;
+    for (let i = 2; i < pts.length - 1; i++) {
+      if (run <= 0) { laid = scatter() < 0.30; run = 6 + (scatter() * 20 | 0); }
+      run--;
+      if (!laid || (i % 3)) continue;
+      const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
+      const ang = Math.atan2(z1 - z0, x1 - x0);
+      const lat = (scatter() - 0.5) * TRACK_WIDTH * 0.5;
+      const x = x0 + Math.cos(ang + Math.PI / 2) * lat;
+      const z = z0 + Math.sin(ang + Math.PI / 2) * lat;
+      const src = lib.get(STONES[(scatter() * STONES.length) | 0]);
+      if (!src) continue;
+      // Set INTO the path rather than on it: a stone proud of the ground is
+      // something to trip over, and these are what he walks on.
+      // Fitted across rather than up, and small: these are single flags of stone
+      // worn into the path, not slabs laid on it. Set deep enough that mostly
+      // what shows is the top face, which is all a trodden-in stone shows.
+      const st = plant(src, x, z, 0.20 + scatter() * 0.16, scatter() * Math.PI * 2, { fit: 'width' });
+      st.position.y -= 0.05 + scatter() * 0.04;
+      sceneryCount++;
+    }
   }
 
   // Undergrowth, close in where it will be seen.
   for (let i = 0; i < 90; i++) {
-    const a = rand() * Math.PI * 2, d = 6 + rand() * 34;
+    const a = scatter() * Math.PI * 2, d = 9 + scatter() * 32;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
     if (onTrack(x, z, 0.7)) continue;
-    const src = lib.get(UNDER_MODELS[(rand() * UNDER_MODELS.length) | 0]);
+    const src = lib.get(UNDER_MODELS[(scatter() * UNDER_MODELS.length) | 0]);
     if (!src) continue;
-    plant(src, x, z, 0.35 + rand() * 0.55, rand() * Math.PI * 2);
+    plant(src, x, z, 0.35 + scatter() * 0.55, scatter() * Math.PI * 2);
     sceneryCount++;
   }
 });
@@ -751,13 +896,11 @@ const CAMP = [
   ['WoodLog',        2.7,  -1.0, 0.34,  0.3 ],
   ['WoodLog',       -2.1,   2.3, 0.34,  2.2 ],
   ['Backpack',       1.5,   1.9, 0.55,  2.7 ],
-  ['Trashcan',       5.6,   3.1, 0.90,  0.4 ],
   ['PropaneTank',    4.9,  -3.7, 0.78,  1.5 ],
   ['GasCan',         5.4,  -3.0, 0.42,  0.9 ],
   ['Pot',           -1.1,  -1.3, 0.30,  0.0 ],
   ['Axe',            2.6,  -1.3, 0.74,  1.9 ],
   ['Shovel',        -5.6,   1.4, 1.10,  0.7 ],
-  ['BearTrap_Open',  7.4,   0.6, 0.20,  2.4 ],
   ['Raft',          -8.4,  -6.0, 0.34,  0.35],
 ];
 let propsLoaded = 0;
@@ -765,7 +908,7 @@ let fire = null;
 for (const [name, x, z, h, yaw] of CAMP) {
   loadProp(name)
     .then(g => {
-      place(g, x, z, h, yaw);
+      place(g, x, z, h, yaw, SOLID[name]);
       propsLoaded++;
       if (name === 'Bonfire_Fire') fire = lightTheFire(g, x, z);
     })
@@ -1239,9 +1382,11 @@ function frame(now) {
     // you can jump onto is the reason the jump is there.
     const h0 = heightAt(pos.x, pos.z);
     const passable = (ux, uz) => {
-      if (airborne) return true;
       const L = Math.hypot(ux, uz);
       if (L < 1e-6) return false;
+      // Solid whether his feet are down or not — a jump does not clear a trunk.
+      if (blocked(pos.x + ux, pos.z + uz, pos.y)) return false;
+      if (airborne) return true;
       const dh = heightAt(pos.x + ux / L * LOOKAHEAD, pos.z + uz / L * LOOKAHEAD) - h0;
       // Downhill and level are never refused, which is what guarantees there is
       // always a way back out of wherever he has walked into.
@@ -1272,7 +1417,7 @@ function frame(now) {
   if (airborne) {
     jumpV += GRAVITY * dt;
     pos.y += jumpV * dt;
-    if (pos.y <= gh) { pos.y = gh; jumpV = 0; airborne = false; }
+    if (pos.y <= gh) { pos.y = gh; jumpV = 0; airborne = false; shoveClear(); }
   } else {
     pos.y = gh;
   }
@@ -1455,7 +1600,7 @@ function measureRef(clipName, samples = 240) {
   };
 }
 
-window.__dbg = { THREE, scene, key, hemi, rim, renderer, ground, pos, LIGHTS, measureRef, TRACKS, heightAt,
+window.__dbg = { THREE, scene, key, hemi, rim, renderer, ground, pos, LIGHTS, measureRef, TRACKS, heightAt, blockers,
                  get root(){ return root; }, get mixer(){ return mixer; }, get clips(){ return clips; } };
 resize();
 requestAnimationFrame(frame);
