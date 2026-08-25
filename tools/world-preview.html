@@ -967,7 +967,10 @@ function startWind() {
   master.gain.linearRampToValueAtTime(1, ctx.currentTime + 4);
   // One short noise buffer, made here and borrowed by every footstep. A step is
   // a filtered burst of it under a fast envelope; nothing is sampled.
-  const stepLen = Math.floor(ctx.sampleRate * 0.3);
+  // Three seconds, not a third of one. Every step reads a random window out of
+  // it, so no two footfalls use the same waveform — which was the whole of why
+  // they sounded identical however much the pitch and filter were jittered.
+  const stepLen = Math.floor(ctx.sampleRate * 3);
   const stepBuf = ctx.createBuffer(1, stepLen, ctx.sampleRate);
   const sd = stepBuf.getChannelData(0);
   for (let i = 0; i < stepLen; i++) sd[i] = Math.random() * 2 - 1;
@@ -976,30 +979,53 @@ function startWind() {
 }
 
 // Grass gives a soft low thud with no top to it; chalk and flint give the same
-// thud with a short bright scatter over it. Same burst, different filter.
+// thud with a bright scatter over it. Two layers rather than one, mixed anew
+// each step, and a random window into the noise so the texture never repeats.
+let footFlip = 1;
 function footstep(onChalk, hard) {
   if (!wind || muted) return;
   const { ctx, stepBuf } = wind;
   const t0 = ctx.currentTime;
-  const level = (hard ? 0.055 : 0.034) * (onChalk ? 1.15 : 1) * (0.82 + Math.random() * 0.36);
+  const rnd = (a, b) => a + Math.random() * (b - a);
 
-  const src = ctx.createBufferSource();
-  src.buffer = stepBuf;
-  src.playbackRate.value = 0.85 + Math.random() * 0.3;
+  footFlip = -footFlip;
+  const level = (hard ? 0.050 : 0.030) * rnd(0.68, 1.35);
+  const dur = rnd(0.075, 0.155);
+  const offset = Math.random() * Math.max(0.01, stepBuf.duration - 0.4);
 
-  const f = ctx.createBiquadFilter();
-  if (onChalk) { f.type = 'bandpass'; f.frequency.value = 1250 + Math.random() * 700; f.Q.value = 0.7; }
-  else { f.type = 'lowpass'; f.frequency.value = 620 + Math.random() * 260; f.Q.value = 0.9; }
+  let out = ctx.createGain();
+  out.gain.value = 1;
+  if (ctx.createStereoPanner) {
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = footFlip * rnd(0.04, 0.20);   // left foot, right foot
+    out.connect(pan); pan.connect(ctx.destination);
+  } else {
+    out.connect(ctx.destination);
+  }
 
-  const env = ctx.createGain();
-  const dur = onChalk ? 0.13 : 0.10;
-  env.gain.setValueAtTime(0.0001, t0);
-  env.gain.exponentialRampToValueAtTime(level, t0 + 0.008);
-  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  const layer = (type, freq, q, gain, d) => {
+    if (gain < 0.0004) return;
+    const src = ctx.createBufferSource();
+    src.buffer = stepBuf;
+    src.playbackRate.value = rnd(0.78, 1.28);
+    const f = ctx.createBiquadFilter();
+    f.type = type; f.frequency.value = freq; f.Q.value = q;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t0);
+    env.gain.exponentialRampToValueAtTime(gain, t0 + rnd(0.004, 0.013));
+    env.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+    src.connect(f); f.connect(env); env.connect(out);
+    src.start(t0, offset);
+    src.stop(t0 + d + 0.04);
+  };
 
-  src.connect(f); f.connect(env); env.connect(ctx.destination);
-  src.start(t0);
-  src.stop(t0 + dur + 0.02);
+  // The weight of it.
+  layer('lowpass', rnd(360, 840), rnd(0.6, 1.35), level * rnd(0.7, 1.1), dur);
+  // The surface. Chalk and grit scatter; turf barely does.
+  const scuff = level * (onChalk ? rnd(0.35, 0.85) : rnd(0.04, 0.26));
+  layer(onChalk ? 'bandpass' : 'highpass',
+        onChalk ? rnd(1100, 2700) : rnd(1500, 3400),
+        rnd(0.5, 1.15), scuff, dur * rnd(0.55, 1.1));
 }
 
 function updateWind(t) {
