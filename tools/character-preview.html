@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NostOS — character creation (prototype)</title>
+<style>
+  :root {
+    --bg: #0b0e0a; --panel: #10140d; --line: #2a3222; --ink: #cfd8c3;
+    --dim: #7f9169; --faint: #566148; --hot: #93ad70;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 system-ui, -apple-system, sans-serif; overflow: hidden; }
+  #wrap { display: flex; height: 100%; }
+
+  /* ---- stage ---- */
+  #stage { flex: 1; min-width: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; padding: 24px; }
+  #view { position: relative; }
+  #big { display: block; background:
+    radial-gradient(ellipse at 50% 95%, #1c2416 0%, #0e120b 62%, #0b0e0a 100%);
+    border: 1px solid var(--line); border-radius: 3px;
+    cursor: grab; touch-action: none; user-select: none; }
+  #big.drag { cursor: grabbing; }
+  #angle { position: absolute; top: 9px; right: 11px; font-size: 10px;
+    letter-spacing: .07em; color: var(--faint); font-variant-numeric: tabular-nums;
+    background: rgba(11,14,10,.6); border: 1px solid var(--line); border-radius: 3px;
+    padding: 3px 7px; cursor: pointer; }
+  #angle:hover { color: var(--ink); }
+  #turn { position: absolute; left: 0; right: 0; bottom: 10px; display: flex;
+    justify-content: center; gap: 8px; }
+  #turn button { min-width: 34px; }
+  .strip { display: flex; align-items: flex-end; gap: 20px; }
+  .cell { text-align: center; }
+  .cell canvas, .cell img { display: block; margin: 0 auto 5px;
+    background: repeating-conic-gradient(#171c12 0% 25%, #131810 0% 50%) 50% / 14px 14px;
+    border: 1px solid var(--line); }
+  .cap { font-size: 9px; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; }
+  #foot { font-size: 11px; color: var(--faint); max-width: 560px; text-align: center; }
+
+  /* ---- panel ---- */
+  #panel { width: 288px; flex: none; background: var(--panel);
+    border-left: 1px solid var(--line); overflow-y: auto; padding: 18px 16px 40px; }
+  h1 { font: 600 11px/1 system-ui; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--hot); margin: 0 0 4px; }
+  .sub { font-size: 11px; color: var(--faint); margin: 0 0 18px; }
+  h2 { font: 600 10px/1 system-ui; letter-spacing: .11em; text-transform: uppercase;
+    color: var(--dim); margin: 20px 0 7px; padding-top: 14px; border-top: 1px solid var(--line); }
+  h2:first-of-type { border-top: 0; padding-top: 0; margin-top: 14px; }
+  .row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  button { background: #1a2113; color: var(--ink); border: 1px solid #333d29;
+    border-radius: 3px; padding: 5px 9px; cursor: pointer; font: inherit; font-size: 11px; }
+  button:hover { background: #232c19; border-color: #46543a; }
+  button.on { background: var(--hot); border-color: #b3ca92; color: #0e120b; font-weight: 600; }
+  button:disabled { opacity: .35; cursor: default; }
+  .base { flex: 1; padding: 8px 4px; text-align: center; }
+  .sw { width: 24px; height: 24px; padding: 0; border-radius: 3px; border-width: 2px; }
+  .sw.on { border-color: var(--ink); }
+  select { width: 100%; background: #1a2113; color: var(--ink);
+    border: 1px solid #333d29; border-radius: 3px; padding: 5px; font: inherit; }
+  input[type=range] { width: 100%; accent-color: var(--hot); }
+  .lab { font-size: 10px; color: var(--faint); letter-spacing: .06em;
+    text-transform: uppercase; margin: 9px 0 3px; }
+  .val { float: right; color: var(--dim); font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
+  .note { font-size: 10px; color: var(--faint); margin-top: 6px; line-height: 1.45; }
+  .lock { font-size: 9px; color: #8a7a4a; letter-spacing: .06em; }
+  #err { color: #d08a6a; font-size: 11px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+
+  <div id="stage">
+    <div id="view">
+      <canvas id="big" width="440" height="440" title="Drag to turn him. Drag up and down to change the camera angle."></canvas>
+      <div id="angle" title="Click to snap back to the isometric angle">0&deg; &middot; 27&deg;</div>
+      <div id="turn">
+        <button data-turn="-45">&#8592;</button>
+        <button id="spinBtn">spin</button>
+        <button data-turn="45">&#8594;</button>
+      </div>
+    </div>
+
+    <div class="strip">
+      <div class="cell"><canvas id="g16" width="61" height="61"></canvas>
+        <div class="cap">new &middot; zoom 1.6</div></div>
+      <div class="cell"><img id="k16" width="61" height="61">
+        <div class="cap">now &middot; zoom 1.6</div></div>
+      <div class="cell"><canvas id="g30" width="115" height="115"></canvas>
+        <div class="cap">new &middot; zoom 3.0</div></div>
+      <div class="cell"><img id="k30" width="115" height="115">
+        <div class="cap">now &middot; zoom 3.0</div></div>
+    </div>
+
+    <div id="foot">
+      Game size is the current sprite&rsquo;s 64&nbsp;px at scale&nbsp;0.6 (38.4&nbsp;world&nbsp;px)
+      times camera zoom. Camera sits at 27&deg;, the true 2:1 isometric angle.
+    </div>
+  </div>
+
+  <div id="panel">
+    <h1>Who came ashore</h1>
+    <p class="sub">Adventurer base &middot; prototype for the in-game creation screen</p>
+
+    <h2>Base</h2>
+    <div class="row" id="baseRow">
+      <button class="base on" data-base="m">Man</button>
+      <button class="base" data-base="f">Woman</button>
+      <button class="base" data-base="u">Neither</button>
+    </div>
+    <div class="note" id="baseNote"></div>
+
+    <h2>Head</h2>
+    <select id="headSel"></select>
+    <div class="lab">Hair</div>
+    <div class="row" id="hairRow"></div>
+    <div class="lab">Hair colour</div>
+    <div class="row" id="hairColRow"></div>
+
+    <h2>Skin</h2>
+    <div class="row" id="skinRow"></div>
+    <div class="lab">Eyes</div>
+    <div class="row" id="eyeRow"></div>
+    <div class="note">Twenty-four triangles per head &mdash; a stylised dot, not
+      an iris with white around it. It reads as eye colour at game size.</div>
+
+    <h2>Clothing</h2>
+    <div class="lab">Main</div>
+    <div class="row" id="cloth1Row"></div>
+    <div class="lab">Trim</div>
+    <div class="row" id="cloth2Row"></div>
+    <div class="row" style="margin-top:9px"><button id="packBtn" class="on">Backpack</button></div>
+
+    <h2>Armour <span class="lock" id="armLock"></span></h2>
+    <div class="row" id="tierRow">
+      <button data-tier="" class="on">none</button>
+      <button data-tier="t">T</button>
+      <button data-tier="w">W</button>
+      <button data-tier="m">M</button>
+      <button data-tier="x">black</button>
+    </div>
+    <div class="lab">Pieces worn</div>
+    <div class="row" id="slotRow">
+      <button data-slot="head">helm</button>
+      <button data-slot="chest" class="on">cuirass</button>
+      <button data-slot="legs" class="on">greaves</button>
+      <button data-slot="feet">boots</button>
+    </div>
+    <div class="lab">Plate strength <span class="val" id="mixVal">0.55</span></div>
+    <input type="range" id="mixSlider" min="0" max="100" value="55">
+    <div class="note">Skin, hair, eyes and brows are never plated &mdash; a cuirass
+      should not recolour a forearm or a face.</div>
+
+    <h2>Later outfits</h2>
+    <div class="row" id="unlockRow"></div>
+    <div class="note">Body, legs and feet swap within the base&rsquo;s own pack.
+      These are the only two in each that read as protective.</div>
+
+    <h2>In hand</h2>
+    <select id="propSel"></select>
+    <div class="lab">Attach to</div>
+    <select id="boneSel">
+      <option value="Wrist.R">right hand</option>
+      <option value="Wrist.L">left hand</option>
+      <option value="Chest">chest</option>
+      <option value="Head">head</option>
+    </select>
+    <div class="lab">Length <span class="val" id="lenVal">0.22 m</span></div>
+    <input type="range" id="lenSlider" min="5" max="150" value="22">
+    <div class="lab">Turn &mdash; X / Y / Z <span class="val" id="rotVal">0 0 0</span></div>
+    <input type="range" id="rotX" min="-180" max="180" value="0">
+    <input type="range" id="rotY" min="-180" max="180" value="0">
+    <input type="range" id="rotZ" min="-180" max="180" value="0">
+    <div class="lab">Shift &mdash; along / across / out <span class="val" id="offVal">0 0 0</span></div>
+    <input type="range" id="offX" min="-50" max="50" value="0">
+    <input type="range" id="offY" min="-50" max="50" value="0">
+    <input type="range" id="offZ" min="-50" max="50" value="0">
+    <div class="lab">Recolour its parts</div>
+    <div id="propMats"></div>
+    <div class="lab">Reshape one part</div>
+    <select id="partSel"></select>
+    <div class="lab">Stretch &mdash; X / Y / Z <span class="val" id="strVal">1.0 1.0 1.0</span></div>
+    <input type="range" id="strX" min="5" max="1200" value="100">
+    <input type="range" id="strY" min="5" max="1200" value="100">
+    <input type="range" id="strZ" min="5" max="1200" value="100">
+    <div class="row" style="margin-top:5px">
+      <button id="anchorBtn" class="on">from centre</button>
+      <button id="hidePartBtn">hide part</button>
+      <button id="strResetBtn">reset shape</button>
+    </div>
+
+    <div class="lab">Glow <span class="val" id="gloVal">0.0</span></div>
+    <input type="range" id="gloSlider" min="0" max="100" value="0">
+    <div class="row" id="gloRow"></div>
+    <div class="row" style="margin-top:8px">
+      <button id="fitBtn">Auto-fit</button>
+      <button id="copyBtn">Copy transform</button>
+    </div>
+    <div class="note" id="propNote"></div>
+
+    <h2>Motion</h2>
+    <select id="animSel"></select>
+    <div class="row" style="margin-top:6px">
+      <button id="playBtn" class="on">Play</button>
+      <button id="slowBtn">&frac12;&times;</button>
+    </div>
+    <div class="lab">Pose <span class="val" id="tVal">0%</span></div>
+    <input type="range" id="tSlider" min="0" max="100" value="0">
+
+    <h2>&nbsp;</h2>
+    <div class="row">
+      <button id="randBtn">Randomise</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+
+    <div id="err"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+
+// THIS FILE LIVES IN THE GITIGNORED _tmp/ AND IS NOT IN THE REPO. It is an
+// instrument, not a deliverable: it reads the CC0 Quaternius packs from
+// _tmp/sprites/ (Ultimate Modular Men / Women, Ultimate Gun Pack, Survival
+// Pack) and nothing it touches ships.
+//
+// What DID come out of it is committed: the finished grip constants and the
+// NostOS item → model table are copied into docs/character-3d-plan.md §7a, so
+// the coordinates survive even if this directory is cleared. If you change
+// them here, change them there.
+const PACKS = {
+  m: { dir: 'Ultimate Modular Men- Feb 2022', kenney: 'humanMaleA',
+       heads: ['Adventurer', 'Worker', 'Farmer', 'Punk', 'Casual_Hoodie', 'Casual_2',
+               'Beach', 'Suit', 'King', 'Swat', 'Spacesuit'],
+       unlocks: ['Swat', 'Spacesuit'], helm: 'Swat' },
+  f: { dir: 'Ultimate Modular Women - April 2022', kenney: 'humanFemaleA',
+       heads: ['Adventurer', 'Casual', 'Worker', 'Punk', 'Formal', 'Suit',
+               'Medieval', 'Witch', 'Soldier', 'SciFi'],
+       // No helmeted head in the women's pack — every one of the ten shows
+       // skin. A helm there falls back to taking the hair off and plating
+       // what head geometry is not skin, which is honest but thin.
+       unlocks: ['Soldier', 'SciFi'], helm: null },
+};
+
+// The three bases. "Neither" is the woman base with a different default head
+// and the long hair primitive off — every edit stays inside one pack, so the
+// cross-pack proportion divergence (58 of 62 bones) is never exercised.
+const BASES = {
+  m: { pack: 'm', head: 'Adventurer', hide: [],
+       note: 'Adam. Men’s pack throughout.' },
+  // Eve: the Casual head's long blonde piece (Hair_Blond, 2,128 tris) is
+  // already blonde in the asset, so no colour override.
+  f: { pack: 'f', head: 'Casual', hide: [],
+       note: 'Eve. Casual head, long blonde hair.' },
+  // Neve: a genuinely short cut. Hiding Eve's long hair does NOT give one —
+  // the 40-triangle Hair_Brown under it is a hairline strip that only exists
+  // to sit beneath the long piece, and on its own it reads as a broken cap.
+  // No head in the women's pack is short. The men's Casual_2 is (1,188 tris),
+  // and a head is driven by one rigid bone, so it grafts across packs without
+  // the deformation a torso would suffer. Body stays the women's Adventurer.
+  u: { pack: 'f', head: 'm/Casual_2', hide: [],
+       note: 'Neve. Women’s body, short cut borrowed from the men’s pack — no head in the women’s ten is short.' },
+};
+
+// Verbatim from src/game/armour.js (ARMOUR_TIERS).
+const TIERS = { t: '#41464d', w: '#5a2214', m: '#2b3140', x: '#141416' };
+const SLOTS = ['head', 'chest', 'legs', 'feet'];
+
+// PROPS. Static meshes, no rig — attaching one is parenting it to a bone, so
+// none of the skinning questions apply. Both packs are untextured with flat
+// named materials, which is what makes "colour parts of it purple" a one-line
+// change rather than a texture edit.
+//
+// The two families to reach for when reskinning a real gun as a NostOS one are
+// AssaultRifle2 and Bullpup: their materials are called Main / MainDark /
+// MainLight — role slots, not literal colours — so setting three values
+// repaints the whole weapon. Everything else names its materials Black,
+// DarkMetal, DarkWood and so on, which recolour fine but read as a wooden gun
+// painted purple rather than a purple gun.
+const GUNS = 'Ultimate Gun Pack - July 2019/OBJ/';
+const SURV = 'Survival Pack - Sept 2020/OBJ/';
+const PROPS = [
+  { g: 'Pistols',    dir: GUNS, m: 0.22, of: ['Pistol_1','Pistol_2','Pistol_3','Pistol_4','Pistol_5','Pistol_6'] },
+  { g: 'Revolvers',  dir: GUNS, m: 0.26, of: ['Revolver_1','Revolver_2','Revolver_3','Revolver_4','Revolver_5'] },
+  { g: 'SMGs',       dir: GUNS, m: 0.52, of: ['SubmachineGun_1','SubmachineGun_2','SubmachineGun_3','SubmachineGun_4','SubmachineGun_5'] },
+  { g: 'Rifles',     dir: GUNS, m: 0.90, of: ['AssaultRifle_1','AssaultRifle_2','AssaultRifle_3','AssaultRifle_4','AssaultRifle_5'] },
+  { g: 'Rifles II',  dir: GUNS, m: 0.90, of: ['AssaultRifle2_1','AssaultRifle2_2','AssaultRifle2_3','AssaultRifle2_4'] },
+  { g: 'Bullpups',   dir: GUNS, m: 0.80, of: ['Bullpup_1','Bullpup_2','Bullpup_3'] },
+  { g: 'Snipers',    dir: GUNS, m: 1.20, of: ['SniperRifle_1','SniperRifle_2','SniperRifle_3','SniperRifle_4','SniperRifle_5','SniperRifle_6'] },
+  { g: 'Shotguns',   dir: GUNS, m: 1.00, of: ['Shotgun_1','Shotgun_2','Shotgun_3','Shotgun_4','Shotgun_SawedOff','Shotgun_ShortStock'] },
+  { g: 'Attachments',dir: GUNS + 'Accessories/', m: 0.20,
+    of: ['Scope_1','Scope_2','Scope_3','Silencer_1','Silencer_2','Silencer_3','Silencer_Short','Silencer_long','Bayonet','Bayonet_2','Bipod','Tripod','Grip','Flashlight','Stock'] },
+  { g: 'Tools',      dir: SURV, m: 0.75, of: ['Knife','Axe','Axe_Small','Shovel','Torch','WoodenTorch','WoodenTorch_Fire','Pan','Pot','Radio','Phone','Compass_Open','Compass_Closed','FlareGun','GasCan','WaterBottle_1','Can_Closed','FirstAidKit','Matchbox','WoodLog'] },
+];
+// NOSTOS ITEM -> MODEL. A first pass, meant to be argued with in the tool
+// rather than in a document: pick an item, see it in the hand, change the model
+// or the colours, copy the numbers back here.
+//
+// `of` is the model, `len` its real length in metres, `cols` the material
+// overrides, `glow` the emissive strength.
+//
+// TWO LAYERS. The grip constant below (GRIPS) is what makes a weapon sit in the
+// fist at all, and it is shared — every pistol-gripped thing uses the same
+// numbers. An entry may then override `rot` or `off` for itself, because the
+// models do not put their origin in the same place relative to the grip: a
+// 1.2 m sniper rifle needs pulling back along its own barrel where a 0.8 m
+// bullpup does not. Trim in the tool, press Copy transform, paste the line
+// here. The sci-fi weapons all reskin a real
+// gun: Bullpup and AssaultRifle2 first, because their materials are named
+// Main / MainDark / MainLight and repaint cleanly.
+const ITEM_MAP = {
+  // --- guns the game already means literally ---
+  pistol:     { dir: GUNS, of: 'Pistol_1',        len: 0.22, off: [-0.02, 0.14, -0.02] },
+  shotgun:    { dir: GUNS, of: 'Shotgun_1',       len: 1.00, off: [-0.07, 0.10, -0.04] },
+  // --- reskins ---
+  stungun:    { dir: GUNS, of: 'Pistol_4',        len: 0.24, off: [0.01, 0.12, -0.05],
+                cols: { Black: '#2b3140', Metal: '#2fb8c8', DarkMetal: '#141416' }, glow: 0.8 },
+  electrogun: { dir: GUNS, of: 'Bullpup_1',       len: 0.80, rot: [180, 172, -87], off: [0.02, 0.12, -0.03],
+                cols: { MainDark: '#141416', MainLight: '#7b3fd4', Main: '#2b3140' }, glow: 1.2 },
+  railgun:    { dir: GUNS, of: 'SniperRifle_4',   len: 1.20, off: [-0.08, 0.11, -0.02],
+                cols: { Black: '#141416', DarkMetal: '#41464d', Metal: '#3f6fd4', Glass: '#3f6fd4' }, glow: 1.0 },
+  wavegun:    { dir: GUNS, of: 'AssaultRifle2_1', len: 0.90, off: [0.01, 0.11, -0.03],
+                cols: { MainDark: '#2b3140', MainLight: '#2fb8c8', Main: '#41464d' }, glow: 0.9 },
+  obgun:      { dir: GUNS, of: 'AssaultRifle2_3', len: 0.95, rot: [180, 180, -94], off: [0, 0.13, -0.03],
+                cols: { MainDark: '#141416', MainLight: '#3fd46f', Main: '#1b2118' }, glow: 1.4 },
+  bow:        null,   // nothing in either pack
+  // --- tools ---
+  // Red handle, steel left alone — a Swiss Army knife, which is what the word
+  // means. Same Knife mesh as the machete, katana and robot sword; only the
+  // length and the handle colour tell them apart.
+  penknife:     { dir: SURV, of: 'Knife',   len: 0.32, rot: [-7, 180, -76], off: [-0.01, 0.16, -0.03],
+                  cols: { DarkWood: '#ff3b2a' } },
+  machete:      { dir: SURV, of: 'Knife',   len: 0.61, rot: [12, -174, -15], off: [-0.02, 0.16, -0.03] },
+  shovel:       { dir: SURV, of: 'Shovel',  len: 1.10, rot: [-100, 6, 92], off: [0.23, 0.12, -0.05] },
+  sledgehammer: { dir: SURV, of: 'Axe',     len: 0.90, rot: [-9, 180, -73], off: [0.11, 0.12, -0.02],
+                  cols: { Wood: '#3b2a16' } },
+  katana:       { dir: SURV, of: 'Knife',   len: 0.49, rot: [171, 2, 83], off: [0.01, 0.17, -0.03],
+                  cols: { Metal: '#b6b2a6' } },
+  // "A heavy blade beaten out of machine parts" — so it is bare cut metal, not
+  // a painted casing. The Knife's four materials are blade / handle / edge /
+  // rivet; the blade and edge go bright tin, the handle takes T2's chassis
+  // grey (#2e3138) because that is literally what it was made from. Kept
+  // clear of #cfd4dc, which is Achilles' silver-white and belongs to him.
+  robot_sword:  { dir: SURV, of: 'Knife',   len: 0.66, rot: [-6, 180, -43], off: [-0.02, 0.18, -0.04],
+                  cols: { Grey: '#c3c9d1', LightGrey: '#e2e7ec', DarkWood: '#2e3138', Yellow: '#8a8574' } },
+  // Lit, and the model separates the flame from the stick: Fire (33% of the
+  // mesh) is the core, Yellow (36%) the outer, DarkWood and LightGrey the
+  // shaft and its binding. Only the first two take a colour, so only they take
+  // the emissive — the wood stays wood.
+  torch:        { dir: SURV, of: 'WoodenTorch_Fire', len: 0.55,
+                  rot: [105, 180, -69], off: [0.03, 0.15, -0.05],
+                  cols: { Fire: '#fff2dc', Yellow: '#ff9a3c' }, glow: 1.8 },
+  compass:      { dir: SURV, of: 'Compass_Open', len: 0.10, rot: [0, 0, 0], off: [0.01, 0.14, -0.06] },
+  // NOT A HAND PROP. The phone lives in its own slot — player.js:340, "the
+  // PHONE box beside the walkman" — so it never reaches `hands` and nothing
+  // would ever ask for it here. Same goes for the walkman (player.js:360).
+  nokia_3310:   null,
+  sniffer:      { dir: SURV, of: 'Radio',   len: 0.22, rot: [-4, -14, 90], off: [0.05, 0.16, -0.03] },
+  // Actually blue. The Radio's materials are Black / LightGrey / DarkGrey / Red
+  // — there is no `Grey`, which is what the first version keyed on, so it did
+  // nothing at all. Casing and face go blue; the Red stays a red LED, and is
+  // left un-overridden so it keeps out of the emissive pass.
+  bluebox:      { dir: SURV, of: 'Radio',   len: 0.18, rot: [0, 0, 0], off: [-0.03, 0.12, -0.06],
+                  cols: { Black: '#25407a', LightGrey: '#5c8fd6', DarkGrey: '#16233f' } },
+  // Bark and the cut face are separate materials (93% / 7%), so the sawn end can
+  // stay pale against a lighter bark rather than the pack's dark red-brown.
+  wood:         { dir: SURV, of: 'WoodLog', len: 0.42, rot: [0, 0, 0], off: [0.01, 0.10, -0.05],
+                  cols: { Wood: '#b08a58', LightWood: '#e0c894' } },
+
+  // A CROWBAR OUT OF A TORCH. David's spot: the unlit WoodenTorch is three parts
+  // stacked by height — Yellow at the bottom (y −0.31…0.36), LightGrey at the
+  // top (1.29…2.11) and DarkWood as the shaft through both — so blackening the
+  // top end and taking the wood to steel reads as a bar with a blackened claw.
+  // Greys from the island's own chassis palette (T2 #2e3138, T1 #41464d).
+  crowbar:      { dir: SURV, of: 'WoodenTorch', len: 0.75, rot: [0, 180, -82], off: [-0.02, 0.15, -0.03],
+                  cols: { DarkWood: '#2e3138', LightGrey: '#141416', Yellow: '#41464d' } },
+
+  // --- gadgets: the same box, recoloured -------------------------------------
+  // None of the three has a model of its own and none needs one — they are all
+  // hand-sized boxes with a lamp on. Reuse the Radio at the bluebox's grip and
+  // let colour do the telling apart, taking the hues from the game's own lamp
+  // palette (robots.js:439) rather than inventing any.
+  //
+  //   wifiblock   jams hunter sensors      → black case, amber face
+  //   ob_spoofer  fakes an obelisk         → the OB green
+  //   fsf_card    "a live system on a card"→ white, per David
+  wifiblock:    { dir: SURV, of: 'Radio',   len: 0.18, rot: [0, 0, 0], off: [-0.03, 0.12, -0.06],
+                  cols: { Black: '#1a1c20', LightGrey: '#ffb020', DarkGrey: '#0e1013' } },
+  ob_spoofer:   { dir: SURV, of: 'Radio',   len: 0.18, rot: [0, 0, 0], off: [-0.03, 0.12, -0.06],
+                  cols: { Black: '#123a24', LightGrey: '#49e07a', DarkGrey: '#0b2416' } },
+  fsf_card:     { dir: SURV, of: 'Radio',   len: 0.16, rot: [0, 0, 0], off: [-0.03, 0.12, -0.06],
+                  cols: { Black: '#e8e8e4', LightGrey: '#f6f6f2', DarkGrey: '#b9b9b2' } },
+
+  // --- no model yet ---
+  bat: null, screwdriver: null, saw: null, seatbelt: null,
+};
+
+// Transforms dialled against a raw model that has no NostOS item behind it
+// yet. Kept so the work survives: the moment one of these becomes an item, the
+// numbers are already here. (The game has no matches; the box was tuned
+// anyway.)
+const RAW_TUNED = {
+  Matchbox:    { len: 0.20, rot: [0, 6, 93], off: [0.01, 0.18, -0.04] },
+  // The kit's Red is 52% of the mesh and the pack ships it dark. Brightened to
+  // the game's own lamp red (robots.js:439) so it is the same red the island
+  // already uses, and the cross goes properly white.
+  FirstAidKit: { len: 0.36, rot: [-9, 9, 87], off: [0.15, 0.14, -0.11],
+                 cols: { Red: '#ff3b2a', White: '#f4f4f0' } },
+  WaterBottle_1: { len: 0.19, rot: [0, 0, 100], off: [-0.02, 0.15, -0.03] },
+  // The electric torch. Its lens is its own material (LightBlue, 3% of the
+  // mesh) so the beam end can go white and take the emissive on its own while
+  // the black body stays dark. A colder, whiter light than WoodenTorch_Fire —
+  // see the note in docs/character-3d-plan.md; this wants to be an item.
+  Torch:       { len: 0.53, rot: [0, 0, 0], off: [-0.02, 0.30, -0.05],
+                 cols: { LightBlue: '#f2f8ff' }, glow: 2.0 },
+};
+
+const GLOW_COLS = ['#fff2dc', '#ff9a3c', '#7b3fd4', '#3f6fd4', '#2fb8c8',
+                  '#3fd46f', '#d4c23f', '#d4553f', '#d43f9e'];
+// Two bright metals at the front — the row had nothing above #6d6a63, so there
+// was no way to pick a cut edge or a tin blade at all.
+const PART_COLS = ['#f2f8ff', '#e2e7ec', '#c3c9d1', '#8a8574', '#6d6a63', '#41464d', '#2e3138',
+                   '#141416', '#2b3140', '#5a2214',
+                   '#e0c894', '#c9a86e', '#b08a58', '#8a6a42', '#5c421f', '#3b2a16',
+                   '#fff2dc', '#ff9a3c', '#d4c23f', '#ff3b2a', '#d4553f',
+                   '#7b3fd4', '#3f6fd4', '#2fb8c8', '#3fd46f'];
+// A cuirass does not recolour a face. These never take the tier blend.
+const NEVER_PLATE = /^(Skin|Eye|Eyebrows|Teeth|Hair|Moustache|Beard)/i;
+const HAIRISH = /^(Hair|Moustache|Beard)/i;
+
+const HAIR_COLS = ['#0e0906', '#2b1a0d', '#4a2f16', '#7b5524', '#b58b3e',
+                   '#8d3a1c', '#6d6a63', '#b6b2a6', '#e6e2d6'];
+// EYES ARE FOUND BY COLOUR, NOT BY NAME. Every head in both packs paints its
+// eyes [0.031, 0.018, 0.011] — but the men call that material `Eye` and the
+// women call it `Brown`, which is also a clothing colour on the same figure.
+// Matching the name would recolour a woman's jacket, and would have let a helm
+// plate her eyes. Matching the linear base colour hits the eyes and nothing
+// else. (On Formal and Medieval the same primitive is 64 tris — eyes and brows
+// together, since those heads carry no separate Eyebrows.)
+const EYE_RGB = [0.031, 0.018, 0.011];
+const EYE_COLS = ['#1a0f08', '#3a2413', '#6b4a22', '#7a6a2e', '#4a6b3a',
+                  '#2f6b78', '#3f6fa8', '#8fb4cc', '#6f6f74'];
+const SKIN_COLS = ['#f0c8a4', '#dfae82', '#c68e5f', '#9d6a42', '#70472b', '#4a2f1d'];
+const CLOTH_COLS = ['#2f3a24', '#4a5236', '#6b6a45', '#8a7b4e', '#7a4a2a',
+                    '#5c3324', '#3c4b56', '#2f3540', '#5a5a5a', '#22241f'];
+
+const $ = id => document.getElementById(id);
+
+const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+renderer.setPixelRatio(1);
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+scene.add(new THREE.AmbientLight(0xffffff, 0.72));
+const key = new THREE.DirectionalLight(0xfff4e2, 1.0); key.position.set(1.2, 2, 1.4); scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fc0e8, 0.42); rim.position.set(-1.3, 0.9, -1.1); scene.add(rim);
+
+const loader = new GLTFLoader();
+const cache = new Map();
+
+let root = null, mixer = null, action = null, clips = [];
+let parts = null, accessory = [], meshList = [], originals = new Map(), grafted = [];
+let radius = 1, focus = new THREE.Vector3();
+// ISO_ELEV is the true 2:1 isometric angle — the one the game actually draws
+// at. Dragging up and down leaves it, which is useful for reading the model and
+// is not what the world looks like, so the readout shows both numbers and one
+// click puts it back.
+const ISO_ELEV = 27;
+let azimuth = 0, elevation = ISO_ELEV, spinning = false, playing = true, slow = false;
+
+const st = fresh();
+function fresh() {
+  return { base: 'm', head: 'Adventurer', hidden: new Set(), hair: null, skin: null, eye: null,
+           cloth: [null, null], pack: true, tier: '', worn: { head: 0, chest: 1, legs: 1, feet: 0 },
+           mix: 0.55, body: null,
+           prop: null, propLen: 0.22, rot: [0, 0, 0], off: [0, 0, 0],
+           matCols: {}, glow: 0, glowCol: '#7b3fd4',
+           stretch: {}, hiddenParts: [], anchor: 'centre' };
+}
+
+const url = (pk, o) => encodeURI(`../sprites/${PACKS[pk].dir}/Individual Characters/glTF/${o}.gltf`);
+const load1 = async (pk, o) => {
+  const k = pk + '/' + o;
+  if (cache.has(k)) return cache.get(k);
+  const g = await loader.loadAsync(url(pk, o)).catch(e => { $('err').textContent = e.message; return null; });
+  if (g) cache.set(k, g);
+  return g;
+};
+
+// WHICH PART IS WHICH.
+//
+// GLTFLoader gives one Mesh per primitive, siblings under one parent per source
+// mesh — and those parents are the pack's own Head / Body / Legs / Feet cut.
+// The first version of this ranked the groups by height and took the top four,
+// which is wrong the moment an outfit has five: the Adventurer's backpack sits
+// at torso height, so it stole the chest slot and pushed body->legs->feet by
+// one. Every armour piece then coloured the part below the one it names.
+//
+// Classify by where the group's centre sits in the figure instead, and treat a
+// torso-height group carrying no skin as an accessory rather than a body.
+function classify(obj) {
+  const groups = new Map();
+  obj.traverse(c => {
+    if (!c.isMesh) return;
+    if (!groups.has(c.parent)) groups.set(c.parent, []);
+    groups.get(c.parent).push(c);
+  });
+  const rows = [...groups.values()].map(ms => {
+    let lo = Infinity, hi = -Infinity, skin = false, face = false, tris = 0;
+    for (const m of ms) {
+      m.geometry.computeBoundingBox();
+      lo = Math.min(lo, m.geometry.boundingBox.min.y);
+      hi = Math.max(hi, m.geometry.boundingBox.max.y);
+      const g = m.geometry;
+      tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+      const n = (m.material && m.material.name) || '';
+      if (/^Skin/i.test(n)) skin = true;
+      if (/^(Eye|Hair|Eyebrows)/i.test(n)) face = true;
+    }
+    return { ms, mid: (lo + hi) / 2, hi, skin, face, tris };
+  });
+  const H = Math.max(...rows.map(r => r.hi)) || 1;
+  const slots = { head: [], chest: [], legs: [], feet: [] };
+  const extra = [];
+  const torso = [];
+  for (const r of rows) {
+    const f = r.mid / H;
+    if (r.face || f > 0.82) slots.head.push(...r.ms);
+    else if (f > 0.55) torso.push(r);
+    else if (f > 0.15) slots.legs.push(...r.ms);
+    else slots.feet.push(...r.ms);
+  }
+  // THE BODY IS THE BIGGEST THING AT TORSO HEIGHT, not the one with skin on it.
+  // Testing for skin looked right on the Adventurer (bare arms, so the body has
+  // skin and the backpack does not) and destroyed the Spacesuit, which is
+  // sealed and carries no Skin material anywhere — its whole 4,022-triangle
+  // torso was filed as an accessory and the body swap then had no chest to
+  // graft, leaving a head and a pair of legs. Size decides; skin only breaks a
+  // tie. Anything else at torso height is worn over the body: a backpack, a
+  // tactical vest.
+  if (torso.length) {
+    let main = torso[0];
+    for (const r of torso) {
+      if (r.skin !== main.skin) { if (r.skin) main = r; continue; }
+      if (r.tris > main.tris) main = r;
+    }
+    for (const r of torso) (r === main ? slots.chest : extra).push(...r.ms);
+  }
+  return { slots, extra };
+}
+
+// Every outfit within a pack carries the identical 62-joint skeleton in the
+// identical order, so a head from one binds straight onto another's skeleton.
+// (ACROSS packs 58 of 62 bones sit differently — hence one pack per base.)
+async function graftHead(pk, from) {
+  // A head may name its own pack ("m/Casual_2"). The head is driven by one
+  // rigid bone, so a cross-pack head is the one graft the proportion
+  // divergence does not deform — worth having, because the women's pack
+  // contains no short-haired head and the men's Casual_2 does.
+  if (from && from.includes('/')) { const i = from.indexOf('/'); pk = from.slice(0, i); from = from.slice(i + 1); }
+  // Whatever happens, last round's head comes off first.
+  for (let i = grafted.length - 1; i >= 0; i--) {
+    if (!grafted[i].userData.isHead) continue;
+    if (grafted[i].parent) grafted[i].parent.remove(grafted[i]);
+    grafted.splice(i, 1);
+  }
+  if (!from || (from === 'Adventurer' && pk === BASES[st.base].pack)) {
+    // Back to the outfit's own head: put it back rather than leaving the
+    // figure decapitated, which is what taking a helm off used to do.
+    parts.head = baseHead.slice();
+    for (const m of parts.head) m.userData.replaced = false;
+    return;
+  }
+  let skel = null;
+  root.traverse(c => { if (c.isSkinnedMesh && !skel) skel = c.skeleton; });
+  if (!skel) return;
+  const g = await load1(pk, from);
+  if (!g) return;
+  const donor = classify(g.scene).slots.head;
+  if (!donor.length) return;
+  for (const m of baseHead) { m.userData.replaced = true; m.visible = false; }
+  parts.head = [];
+  for (const src of donor) {
+    const m = src.clone();
+    m.userData.isHead = true;
+    if (m.isSkinnedMesh) m.bind(skel, src.bindMatrix);
+    root.add(m); grafted.push(m); meshList.push(m);
+    originals.set(m, src.material);
+    parts.head.push(m);
+  }
+}
+
+// A HELM IS GEOMETRY, NOT A TINT. Once skin and hair are protected there is
+// nothing on a bare head left for a colour to say. The men's pack has two
+// covered heads (Swat, Spacesuit); the women's has none — all ten show skin —
+// so there the helm can only take the hair off and plate what is not skin.
+let helmOn = false, baseHead = [];
+
+// ---- props in the hand ----------------------------------------------------
+const propCache = new Map();
+let propGroup = null, propMats = [], propSpan = 1, propBone = null;
+let propParts = new Map();   // material name -> its own Mesh, once split
+
+function loadProp(dir, name) {
+  const k = dir + name;
+  if (propCache.has(k)) return Promise.resolve(propCache.get(k));
+  const base = '../sprites/' + dir;
+  return new Promise((res, rej) => {
+    new MTLLoader().setPath(encodeURI(base)).load(name + '.mtl', mtl => {
+      mtl.preload();
+      new OBJLoader().setMaterials(mtl).setPath(encodeURI(base)).load(name + '.obj', obj => {
+        propCache.set(k, obj); res(obj);
+      }, undefined, rej);
+    }, undefined, rej);
+  });
+}
+
+// ONE MESH PER MATERIAL. The OBJs are single objects with several material
+// groups, so OBJLoader hands back one Mesh carrying a material array — and a
+// group inside a mesh cannot be moved, scaled or hidden on its own. Splitting
+// on load is what makes "stretch the axe blade" a thing you can do at all, and
+// it gives per-part hiding for free.
+function splitByMaterial(mesh) {
+  const g = mesh.geometry;
+  const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  if (!g.groups || g.groups.length < 2 || mats.length < 2) return [mesh];
+  const out = [];
+  for (const grp of g.groups) {
+    const sub = new THREE.BufferGeometry();
+    if (g.index) {
+      const idx = g.index.array.slice(grp.start, grp.start + grp.count);
+      for (const name of Object.keys(g.attributes)) sub.setAttribute(name, g.attributes[name]);
+      sub.setIndex(new THREE.BufferAttribute(idx, 1));
+    } else {
+      for (const name of Object.keys(g.attributes)) {
+        const a = g.attributes[name], n = a.itemSize;
+        sub.setAttribute(name, new THREE.BufferAttribute(
+          a.array.slice(grp.start * n, (grp.start + grp.count) * n), n));
+      }
+    }
+    const m = new THREE.Mesh(sub, mats[grp.materialIndex]);
+    m.name = (mats[grp.materialIndex] && mats[grp.materialIndex].name) || '';
+    out.push(m);
+  }
+  return out;
+}
+
+function detachProp() {
+  if (propGroup && propGroup.parent) propGroup.parent.remove(propGroup);
+  propGroup = null; propMats = [];
+}
+
+async function attachProp() {
+  detachProp();
+  if (!st.prop) { buildPropMats(); return; }
+  const [dir, name] = [st.prop.dir, st.prop.name];
+  const src = await loadProp(dir, name).catch(e => { $('err').textContent = e.message || 'prop load failed'; return null; });
+  if (!src) return;
+  // ASK THE SKELETON, don't walk the scene. GLTFLoader does not guarantee the
+  // joints hang under the mesh's own node, and traversing root for `isBone`
+  // found nothing at all here. skeleton.bones is the list the skin actually
+  // uses, in the order the skin indices mean.
+  // THREE.JS RENAMES THE BONES. A dot is a path separator in its animation
+  // binding, so PropertyBinding.sanitizeNodeName DELETES it on load: the rig's
+  // `Wrist.R` arrives as `WristR`, not `Wrist_R`. Matching the name straight
+  // out of the glTF finds nothing, and so does swapping the dot for an
+  // underscore. Strip everything that is not a letter or a digit on both
+  // sides and compare that.
+  const key = n => String(n).replace(/[^a-z0-9]/gi, '').toLowerCase();
+  propBone = null;
+  let skel = null;
+  root.traverse(c => { if (c.isSkinnedMesh && !skel) skel = c.skeleton; });
+  const wantBone = key($('boneSel').value);
+  if (skel) propBone = skel.bones.find(b => key(b.name) === wantBone) || null;
+  if (!propBone) root.traverse(c => { if (c.isBone && key(c.name) === wantBone && !propBone) propBone = c; });
+  if (!propBone) {
+    const have = skel ? skel.bones.map(b => b.name).slice(0, 8).join(', ') : 'no skeleton';
+    $('err').textContent = `no bone "${$('boneSel').value}" — have: ${have}…`;
+    return;
+  }
+
+  // Clone so the cached original stays clean, and give every part its own
+  // material — the pack shares one Metal across many models.
+  const obj = src.clone(true);
+  propMats = []; propParts = new Map();
+  const merged = [];
+  obj.traverse(c => { if (c.isMesh) merged.push(c); });
+  for (const c of merged) {
+    const list = Array.isArray(c.material) ? c.material : [c.material];
+    const cloned = list.map(m => { const n = m.clone(); n.userData.origColor = m.color.clone(); return n; });
+    c.material = Array.isArray(c.material) ? cloned : cloned[0];
+    const parts = splitByMaterial(c);
+    if (parts.length > 1) {
+      const parent = c.parent;
+      parent.remove(c);
+      for (const pt of parts) { parent.add(pt); propParts.set(pt.name, pt); }
+    } else {
+      propParts.set((cloned[0] && cloned[0].name) || '', c);
+    }
+    propMats.push(...cloned);
+  }
+
+  // The models are ~10x life size and lie along +X (guns) or +Y (tools). Take
+  // the longest dimension as the span and scale that to a real length, so a
+  // pistol and a sniper rifle both arrive plausible without separate numbers.
+  const box = new THREE.Box3().setFromObject(obj);
+  const sz = new THREE.Vector3(); box.getSize(sz);
+  propSpan = Math.max(sz.x, sz.y, sz.z) || 1;
+
+  propGroup = new THREE.Group();
+  propGroup.add(obj);
+  propBone.add(propGroup);
+  placeProp();
+  buildPropMats();
+  buildPartSel();
+  paintProp();
+  shapeProp();
+}
+
+function placeProp() {
+  if (!propGroup) return;
+  const k = st.propLen / propSpan;
+  propGroup.scale.setScalar(k);
+  propGroup.rotation.set(...st.rot.map(THREE.MathUtils.degToRad));
+  propGroup.position.set(st.off[0], st.off[1], st.off[2]);
+  $('lenVal').textContent = st.propLen.toFixed(2) + ' m';
+  $('rotVal').textContent = st.rot.join(' ');
+  $('offVal').textContent = st.off.map(v => v.toFixed(2)).join(' ');
+}
+
+function buildPropMats() {
+  const names = [...new Set(propMats.map(m => m.name).filter(Boolean))];
+  $('propMats').innerHTML = names.length ? names.map(n =>
+    `<div style="margin-top:5px"><div class="lab" style="margin:0 0 2px">${n}</div>` +
+    `<div class="row" data-mat="${n}">` +
+    PART_COLS.map(c => `<button class="sw${st.matCols[n] === c ? ' on' : ''}" data-col="${c}" style="background:${c}"></button>`).join('') +
+    `<button data-col="" style="font-size:10px">reset</button></div></div>`).join('')
+    : '<div class="note">nothing in hand</div>';
+  $('gloRow').innerHTML = GLOW_COLS.map(c =>
+    `<button class="sw${st.glowCol === c ? ' on' : ''}" data-col="${c}" style="background:${c}"></button>`).join('');
+  // A colour override keyed on a material the model does not have is silent —
+  // it just never applies, and the bluebox sat grey for hours because of one.
+  // Say so instead.
+  const stray = Object.keys(st.matCols).filter(n => !names.includes(n));
+  $('propNote').textContent = st.prop
+    ? `${st.prop.name} — ${names.length} material${names.length === 1 ? '' : 's'}`
+      + (stray.length ? `  ⚠ no such material: ${stray.join(', ')}` : '')
+    : '';
+  if (stray.length) console.warn('[preview] unknown material override', stray, 'on', st.prop.name);
+}
+
+// SCALE ABOUT THE PART, NOT THE MODEL'S ORIGIN.
+//
+// The first version just set mesh.scale, which scales about the origin — and an
+// axe head sits at y 1.37…2.39, so doubling it sent the head to 2.74…4.78 and
+// off the end of the haft rather than making it longer. Scaling about a point p
+// is v' = p + S(v − p), which is the same as scale S with the mesh shifted by
+// p(1 − S), so the anchor costs one position set.
+//
+// Two anchors are useful and they are not the same job: `centre` grows a part
+// in place, `base` pins the low end of the axis and grows the other way, which
+// is what you want to draw a blade out from where it meets the handle.
+function shapeProp() {
+  for (const [name, mesh] of propParts) {
+    const st3 = st.stretch[name] || [1, 1, 1];
+    mesh.scale.set(st3[0], st3[1], st3[2]);
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    const bb = mesh.geometry.boundingBox;
+    const p = st.anchor === 'base' ? bb.min : bb.getCenter(new THREE.Vector3());
+    mesh.position.set(p.x * (1 - st3[0]), p.y * (1 - st3[1]), p.z * (1 - st3[2]));
+    mesh.visible = !st.hiddenParts.includes(name);
+  }
+  const sel = $('partSel').value;
+  const cur = st.stretch[sel] || [1, 1, 1];
+  $('strVal').textContent = cur.map(v => v.toFixed(2)).join(' ');
+  $('hidePartBtn').classList.toggle('on', st.hiddenParts.includes(sel));
+}
+
+function buildPartSel() {
+  const names = [...propParts.keys()].filter(Boolean);
+  $('partSel').innerHTML = names.length
+    ? names.map(n => `<option value="${n}">${n}</option>`).join('')
+    : '<option value="">—</option>';
+  syncStretchSliders();
+}
+
+function syncStretchSliders() {
+  const cur = st.stretch[$('partSel').value] || [1, 1, 1];
+  for (const [id, i] of [['strX', 0], ['strY', 1], ['strZ', 2]])
+    $(id).value = String(Math.round(cur[i] * 100));
+}
+
+function paintProp() {
+  for (const m of propMats) {
+    const want = st.matCols[m.name];
+    m.color.copy(want ? new THREE.Color(want) : m.userData.origColor);
+    if (m.emissive) {
+      // GLOW IS FREE HERE. The packs ship Ke 0, but a flat material with an
+      // emissive term needs no texture and no extra geometry — which is what
+      // turns a real rifle into an electro-gun rather than a purple rifle.
+      const lit = st.glow > 0 && want;
+      m.emissive.copy(lit ? new THREE.Color(want) : new THREE.Color(0x000000));
+      m.emissiveIntensity = st.glow;
+    }
+    m.needsUpdate = true;
+  }
+  $('gloVal').textContent = st.glow.toFixed(2);
+}
+async function applyHelm() {
+  const pk = BASES[st.base].pack, helm = PACKS[pk].helm;
+  const want = !!(st.tier && st.worn.head && helm);
+  if (want === helmOn) return;
+  helmOn = want;
+  await graftHead(pk, want ? helm : (st.head || BASES[st.base].head));
+  findEyes();
+}
+
+function matName(m) { const o = originals.get(m); return (o && o.name) || ''; }
+
+let eyeMeshes = new Set();
+function findEyes() {
+  eyeMeshes = new Set();
+  for (const m of parts.head) {
+    const c = originals.get(m) && originals.get(m).color;
+    if (!c) continue;
+    if (Math.abs(c.r - EYE_RGB[0]) < 0.012 &&
+        Math.abs(c.g - EYE_RGB[1]) < 0.012 &&
+        Math.abs(c.b - EYE_RGB[2]) < 0.012) eyeMeshes.add(m);
+  }
+}
+
+function paint() {
+  if (!parts) return;
+  const tint = (m, slot) => {
+    const name = matName(m);
+    const base = originals.get(m);
+    m.visible = !st.hidden.has(name) && !m.userData.replaced;
+    if (!m.visible) return;
+    let col = base.color;
+    if (eyeMeshes.has(m)) col = st.eye ? new THREE.Color(st.eye) : base.color;
+    else if (HAIRISH.test(name) && st.hair) col = new THREE.Color(st.hair);
+    else if (/^Skin/i.test(name) && st.skin) col = new THREE.Color(st.skin);
+    else if (st.cloth[0] && name === clothKeys[0]) col = new THREE.Color(st.cloth[0]);
+    else if (st.cloth[1] && name === clothKeys[1]) col = new THREE.Color(st.cloth[1]);
+    else col = base.color;
+    // PLATE LAST, and never over skin, hair, eyes or brows.
+    if (slot && st.tier && st.worn[slot] && !NEVER_PLATE.test(name) && !eyeMeshes.has(m)) {
+      col = col.clone().lerp(new THREE.Color(TIERS[st.tier]), st.mix);
+    }
+    const mat = base.clone();
+    mat.color = col.clone ? col.clone() : col;
+    mat.needsUpdate = true;
+    m.material = mat;
+  };
+  for (const slot of SLOTS) for (const m of parts[slot]) tint(m, slot);
+  for (const m of accessory) { tint(m, null); if (!st.pack) m.visible = false; }
+}
+
+// The two biggest non-skin, non-hair materials on the body are what a player
+// reads as "the jacket" and "the trim".
+let clothKeys = [null, null];
+function findCloth() {
+  const area = new Map();
+  for (const m of [...parts.chest, ...parts.legs, ...accessory]) {
+    const n = matName(m);
+    if (!n || NEVER_PLATE.test(n) || eyeMeshes.has(m)) continue;
+    const g = m.geometry, idx = g.index;
+    area.set(n, (area.get(n) || 0) + (idx ? idx.count : g.attributes.position.count));
+  }
+  clothKeys = [...area.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(e => e[0]);
+}
+
+function buildHairControls() {
+  const names = [...new Set(parts.head.map(matName).filter(n => HAIRISH.test(n) || n === 'Eyebrows'))];
+  $('hairRow').innerHTML = names.length
+    ? names.map(n => `<button data-mat="${n}"${st.hidden.has(n) ? '' : ' class="on"'}>${n.replace(/^Hair_?/, '') || 'hair'}</button>`).join('')
+      + `<button data-mat="__bald"${names.filter(x => x !== 'Eyebrows').every(x => st.hidden.has(x)) ? ' class="on"' : ''}>bald</button>`
+    : '<span class="note">this head has no separable hair</span>';
+  $('hairRow').onclick = e => {
+    const btn = e.target.closest('[data-mat]');
+    if (!btn) return;
+    const n = btn.dataset.mat;
+    const wigs = names.filter(x => x !== 'Eyebrows');
+    if (n === '__bald') {
+      // Toggle, not a one-way trip: clicking bald twice used to leave you bald.
+      const bald = wigs.every(x => st.hidden.has(x));
+      wigs.forEach(x => bald ? st.hidden.delete(x) : st.hidden.add(x));
+    } else if (st.hidden.has(n)) st.hidden.delete(n);
+    else st.hidden.add(n);
+    buildHairControls(); refresh();
+  };
+}
+
+async function build() {
+  $('err').textContent = '';
+  // TAKE THE OLD GRAFTS OFF FIRST. `grafted` is the only handle on meshes that
+  // were cloned into the scene; clearing it before removing them orphaned a
+  // head inside root, and every head change stacked another one on top of the
+  // last. Same fault put the Adventurer's bedroll on the Swat's shoulders.
+  for (const m of grafted) if (m.parent) m.parent.remove(m);
+  grafted = [];
+  const b = BASES[st.base], pk = b.pack;
+  const g = await load1(pk, 'Adventurer');
+  if (!g) return;
+  if (root) scene.remove(root);
+  root = g.scene; scene.add(root);
+  root.traverse(c => { if (c.isMesh) c.userData.replaced = false; });
+
+  clips = g.animations.slice().sort((a, b2) => a.name.localeCompare(b2.name));
+  const want = animSel.value && clips[+animSel.value] ? +animSel.value : clips.findIndex(c => c.name === 'Idle');
+  animSel.innerHTML = clips.map((c, i) => `<option value="${i}">${c.name}</option>`).join('');
+  animSel.value = String(want >= 0 ? want : 0);
+  mixer = new THREE.AnimationMixer(root);
+
+  meshList = []; originals = new Map();
+  root.traverse(c => { if (c.isMesh) { meshList.push(c); originals.set(c, c.material); } });
+  const cl = classify(root);
+  parts = cl.slots; accessory = cl.extra;
+  baseHead = parts.head.slice();   // so a helm can be taken off again
+
+  helmOn = false;
+  await graftHead(pk, st.head || b.head);
+  if (st.body) await swapBody(pk, st.body);
+  await applyHelm();
+  findEyes();
+  findCloth();
+
+  $('k16').src = $('k30').src = `../reference/kenney/${PACKS[pk].kenney}_idle0_S.png`;
+
+  syncUI();
+  setClip(); refresh();
+  await attachProp();
+}
+
+function setClip() {
+  if (!mixer || !clips.length) return;
+  if (action) action.stop();
+  action = mixer.clipAction(clips[+$('animSel').value]);
+  action.play(); action.paused = !playing;
+}
+
+// PAINT FIRST, MEASURE SECOND. frameModel() skips hidden meshes, which is right
+// (a stowed backpack should not widen the shot) and means it must never run
+// before paint() has decided what is hidden. Run the other way round it framed
+// a fresh Adventurer using visibility left over from the previous build — head
+// hidden by an earlier graft, so the camera pulled in and cropped him.
+function refresh() { paint(); frameModel(); }
+
+// A SkinnedMesh reports its UNPOSED geometry box, so sampling clips adds
+// nothing. One framing for every clip stops the figure breathing in and out.
+function frameModel() {
+  const box = new THREE.Box3();
+  root.updateWorldMatrix(true, true);
+  for (const m of meshList) {
+    if (!m.visible) continue;
+    m.geometry.computeBoundingBox();
+    box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld));
+  }
+  const s = new THREE.Vector3(); box.getSize(s); box.getCenter(focus);
+  radius = Math.max(s.y, s.x, 0.001) / 2 * 1.08;
+}
+
+function aim() {
+  const e = THREE.MathUtils.degToRad(elevation), a = THREE.MathUtils.degToRad(azimuth);
+  const d = Math.max(radius * 4, 10);
+  camera.position.set(focus.x + Math.cos(e) * Math.sin(a) * d,
+                      focus.y + Math.sin(e) * d,
+                      focus.z + Math.cos(e) * Math.cos(a) * d);
+  camera.up.set(0, 1, 0); camera.lookAt(focus);
+  camera.left = -radius; camera.right = radius; camera.top = radius; camera.bottom = -radius;
+  camera.near = 0.01; camera.far = d + radius * 2;
+  camera.updateProjectionMatrix();
+}
+
+const targets = [[$('big'), 440], [$('g16'), 61], [$('g30'), 115]];
+function draw() {
+  if (!root) return;
+  aim();
+  for (const [cv, size] of targets) {
+    renderer.setSize(size, size, false);
+    renderer.render(scene, camera);
+    const cx = cv.getContext('2d');
+    cx.clearRect(0, 0, size, size);
+    cx.drawImage(renderer.domElement, 0, 0, size, size);
+  }
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000) * (slow ? 0.5 : 1); last = now;
+  if (spinning) { azimuth = (azimuth + dt * 42) % 360; showAngle(); }
+  if (mixer && playing) {
+    mixer.update(dt);
+    if (action) {
+      const f = (action.time / action.getClip().duration) % 1;
+      $('tSlider').value = String(Math.round(f * 100));
+      $('tVal').textContent = Math.round(f * 100) + '%';
+    }
+  }
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---- wiring ---------------------------------------------------------------
+//
+// TWO RULES, because breaking either is what made the panel unreliable.
+//
+// 1. ONE SOURCE OF TRUTH. `st` holds the character; syncUI() derives every
+//    control's appearance from it. No handler sets its own highlight — it
+//    changes `st` and asks for a sync. Setting the class at click time AND
+//    rebuilding it in build() meant the two drifted apart, so a button could
+//    read "on" for a thing that was no longer applied.
+// 2. ONE AT A TIME. build() awaits a network load, so two quick clicks used to
+//    run two builds over the same root, parts and graft list. run() chains
+//    every state change onto a single promise, so they queue instead.
+
+let queue = Promise.resolve();
+const run = fn => (queue = queue.then(fn).catch(err => {
+  $('err').textContent = String(err && err.message || err);
+  console.error(err);
+}));
+
+// Handlers change `st` and sync the panel SYNCHRONOUSLY, then ask for a
+// rebuild. Doing it the other way round — mutating inside the queued function
+// — meant a guard like `if (btn.dataset.base === st.base) return` compared
+// against state the queued work had not reached yet, and a quick third click
+// was read as a no-op and thrown away.
+//
+// Rebuilds coalesce: build() reads whatever `st` says when it finally runs, so
+// only the last request needs to do any work.
+let wanted = 0;
+function rebuild() {
+  const mine = ++wanted;
+  return run(async () => { if (mine === wanted) await build(); });
+}
+
+function swatchRow(el, cols, current) {
+  el.innerHTML = cols.map(c =>
+    `<button class="sw${current === c ? ' on' : ''}" data-col="${c}" style="background:${c}"></button>`).join('')
+    + `<button data-col=""${current ? '' : ' class="on"'} style="font-size:10px">reset</button>`;
+}
+
+function syncUI() {
+  const pk = BASES[st.base].pack;
+  for (const b of $('baseRow').children) b.classList.toggle('on', b.dataset.base === st.base);
+  $('baseNote').textContent = BASES[st.base].note;
+  // Repopulate the per-pack lists here rather than in build(), so a sync that
+  // runs the instant a base button is clicked is never showing the old pack's
+  // heads while the rebuild is still queued.
+  // The women's pack has no short-haired head; borrow the men's shortest.
+  const heads = pk === 'f' ? PACKS[pk].heads.concat('m/Casual_2', 'm/Suit') : PACKS[pk].heads;
+  if ([...$('headSel').options].map(o => o.value).join() !== heads.join())
+    $('headSel').innerHTML = heads.map(h => `<option value="${h}">${h}</option>`).join('');
+  const unlocks = PACKS[pk].unlocks;
+  if ([...$('unlockRow').children].map(b => b.dataset.body).join() !== unlocks.concat('').join())
+    $('unlockRow').innerHTML = unlocks.map(o => `<button data-body="${o}">${o}</button>`).join('')
+      + '<button data-body="">Adventurer</button>';
+  $('headSel').value = st.head || BASES[st.base].head;
+
+  buildHairControls();
+  swatchRow($('hairColRow'), HAIR_COLS, st.hair);
+  swatchRow($('skinRow'), SKIN_COLS, st.skin);
+  swatchRow($('eyeRow'), EYE_COLS, st.eye);
+  swatchRow($('cloth1Row'), CLOTH_COLS, st.cloth[0]);
+  swatchRow($('cloth2Row'), CLOTH_COLS, st.cloth[1]);
+
+  $('packBtn').disabled = !accessory.length;
+  $('packBtn').classList.toggle('on', st.pack && !!accessory.length);
+
+  for (const b of $('tierRow').children) b.classList.toggle('on', b.dataset.tier === st.tier);
+  for (const b of $('slotRow').children) b.classList.toggle('on', !!st.worn[b.dataset.slot]);
+  for (const b of $('unlockRow').children) b.classList.toggle('on', b.dataset.body === (st.body || ''));
+
+  $('mixSlider').value = String(Math.round(st.mix * 100));
+  $('mixVal').textContent = st.mix.toFixed(2);
+}
+
+$('baseRow').onclick = e => {
+  const btn = e.target.closest('[data-base]');
+  if (!btn || btn.dataset.base === st.base) return;
+  st.base = btn.dataset.base;
+  st.head = BASES[st.base].head;
+  st.hidden = new Set(BASES[st.base].hide);
+  st.body = null;
+  syncUI(); rebuild();
+};
+
+$('headSel').onchange = e => { st.head = e.target.value; syncUI(); rebuild(); };
+
+$('unlockRow').onclick = e => {
+  const btn = e.target.closest('[data-body]');
+  if (!btn) return;
+  const o = btn.dataset.body || null;
+  if (o === st.body) return;
+  st.body = o;
+  syncUI(); rebuild();
+};
+
+// Body / legs / feet from another outfit in the SAME pack. Called from build(),
+// so a body swap survives a head change or a randomise instead of being
+// silently dropped while its button still read "on".
+async function swapBody(pk, from) {
+  let skel = null;
+  root.traverse(c => { if (c.isSkinnedMesh && !skel) skel = c.skeleton; });
+  const g = await load1(pk, from);
+  if (!g || !skel) return;
+  const cl = classify(g.scene);
+  const donor = cl.slots;
+  const graftOne = src => {
+    const m = src.clone();
+    m.userData.isBody = true;
+    if (m.isSkinnedMesh) m.bind(skel, src.bindMatrix);
+    root.add(m); grafted.push(m); meshList.push(m);
+    originals.set(m, src.material);
+    return m;
+  };
+  for (const slot of ['chest', 'legs', 'feet']) {
+    for (const m of parts[slot]) { m.userData.replaced = true; m.visible = false; }
+    parts[slot] = [];
+    for (const src of donor[slot]) parts[slot].push(graftOne(src));
+  }
+  // HIDE THEM, then drop them. Clearing the array first meant paint() never
+  // visited these again, so `replaced` was set on meshes nothing would ever
+  // read — and the Adventurer's bedroll stayed on the Swat's shoulders.
+  for (const m of accessory) { m.userData.replaced = true; m.visible = false; }
+  // The donor's own over-body pieces come across too — otherwise the Swat
+  // arrives without its vest.
+  accessory = cl.extra.map(graftOne);
+  findCloth();
+}
+
+$('packBtn').onclick = () => { st.pack = !st.pack; syncUI(); refresh(); };
+
+$('tierRow').onclick = e => {
+  const btn = e.target.closest('[data-tier]');
+  if (!btn || btn.dataset.tier === st.tier) return;
+  st.tier = btn.dataset.tier;
+  syncUI();
+  run(async () => { await applyHelm(); refresh(); });
+};
+
+$('slotRow').onclick = e => {
+  const btn = e.target.closest('[data-slot]');
+  if (!btn) return;
+  const s = btn.dataset.slot;
+  st.worn[s] = st.worn[s] ? 0 : 1;
+  syncUI();
+  run(async () => { await applyHelm(); refresh(); });
+};
+
+for (const [el, key] of [['hairColRow', 'hair'], ['skinRow', 'skin'], ['eyeRow', 'eye'],
+                         ['cloth1Row', 0], ['cloth2Row', 1]]) {
+  $(el).onclick = e => {
+    const btn = e.target.closest('[data-col]');
+    if (!btn) return;
+    const c = btn.dataset.col || null;
+    if (typeof key === 'number') st.cloth[key] = c; else st[key] = c;
+    syncUI(); paint();
+  };
+}
+
+$('mixSlider').oninput = e => {
+  st.mix = +e.target.value / 100;
+  $('mixVal').textContent = st.mix.toFixed(2);
+  paint();
+};
+
+$('animSel').onchange = setClip;
+$('playBtn').onclick = e => { playing = !playing; e.target.classList.toggle('on', playing); if (action) action.paused = !playing; };
+$('slowBtn').onclick = e => { slow = !slow; e.target.classList.toggle('on', slow); };
+$('spinBtn').onclick = e => { spinning = !spinning; e.target.classList.toggle('on', spinning); };
+
+const pick = a => a[Math.floor(Math.random() * a.length)];
+$('randBtn').onclick = () => {
+  const pk = BASES[st.base].pack;
+  st.head = pick(PACKS[pk].heads);
+  st.hidden = new Set();
+  st.hair = pick(HAIR_COLS); st.skin = pick(SKIN_COLS); st.eye = pick(EYE_COLS);
+  st.cloth = [pick(CLOTH_COLS), pick(CLOTH_COLS)];
+  syncUI(); rebuild();
+};
+
+$('resetBtn').onclick = () => {
+  const b = st.base;
+  Object.assign(st, fresh(), { base: b, head: BASES[b].head, hidden: new Set(BASES[b].hide) });
+  syncUI(); rebuild();
+};
+
+// ---- drag to turn ---------------------------------------------------------
+// Pointer events, so a trackpad, a mouse and a finger all arrive the same way.
+// Capture on the canvas means a drag that leaves it keeps turning rather than
+// sticking halfway round, and releasing anywhere ends it.
+(() => {
+  const cv = $('big');
+  let id = null, px = 0, py = 0;
+  const DEG_PER_PX = 0.55;
+  cv.addEventListener('pointerdown', e => {
+    id = e.pointerId; px = e.clientX; py = e.clientY;
+    spinning = false; $('spinBtn').classList.remove('on');
+    cv.classList.add('drag');
+    cv.setPointerCapture(id);
+  });
+  cv.addEventListener('pointermove', e => {
+    if (e.pointerId !== id) return;
+    azimuth = (azimuth - (e.clientX - px) * DEG_PER_PX + 360) % 360;
+    elevation = Math.max(-15, Math.min(85, elevation + (e.clientY - py) * DEG_PER_PX * 0.6));
+    px = e.clientX; py = e.clientY;
+    showAngle();
+  });
+  const end = e => {
+    if (e.pointerId !== id) return;
+    cv.releasePointerCapture(id); id = null; cv.classList.remove('drag');
+  };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+  $('angle').onclick = () => { azimuth = 0; elevation = ISO_ELEV; showAngle(); };
+})();
+
+function showAngle() {
+  const off = Math.abs(elevation - ISO_ELEV) > 0.5;
+  $('angle').innerHTML = `${Math.round(azimuth)}° · ${Math.round(elevation)}°`
+    + (off ? ' <span style="color:#8a7a4a">off iso</span>' : '');
+}
+$('turn').onclick = e => {
+  const btn = e.target.closest('[data-turn]');
+  if (btn) { azimuth = (azimuth + +btn.dataset.turn + 360) % 360; showAngle(); }
+};
+$('tSlider').oninput = e => {
+  if (!action) return;
+  playing = false; $('playBtn').classList.remove('on'); action.paused = true;
+  action.time = action.getClip().duration * (+e.target.value / 100);
+  mixer.update(0);
+  $('tVal').textContent = e.target.value + '%';
+};
+// Item selector first (the mapping), then the raw model list under it.
+$('propSel').innerHTML =
+  '<option value="">— nothing in hand —</option>'
+  + '<optgroup label="NostOS items">'
+  + Object.keys(ITEM_MAP).map(k =>
+      `<option value="item:${k}">${k}${ITEM_MAP[k] ? '' : '  (no model)'}</option>`).join('')
+  + '</optgroup>'
+  + PROPS.map(gp => `<optgroup label="${gp.g}">`
+      + gp.of.map(n => `<option value="raw:${gp.g}|${n}">${n}</option>`).join('')
+      + '</optgroup>').join('');
+
+const RAWDIR = {};
+for (const gp of PROPS) for (const n of gp.of) RAWDIR[gp.g + '|' + n] = gp;
+
+const GRIPS = {
+  // A gun lies along its own +X, and this sends that axis to the bone's +Y —
+  // out through the fingers, pointing where he is looking.
+  //
+  // Getting here took two wrong turns. [0, 180, −90] read as held but fired
+  // backwards; flipping the sign of the Z turn reversed the barrel and left the
+  // weapon upside down, because the Y=180 had already rolled it. Barrel
+  // direction and roll are separate, and both had to move.
+  // The 0.15 along the bone's +Y matters: the joint is at the WRIST, and a hand
+  // is about that long, so without it the weapon hangs off the joint instead of
+  // sitting in the fist.
+  // Five weapons trimmed by hand came out within a couple of centimetres of
+  // each other: along −0.08…+0.01, across 0.10…0.15, out −0.05…0.00. That
+  // spread is about the size of the trimming itself, so there is no formula
+  // worth deriving — but the middle of it makes a much better default than any
+  // single weapon's numbers, and most guns need no trim from here.
+  gun:  { rot: [180, 180, -90], off: [-0.03, 0.12, -0.03] },
+  // Tools lie along +Y, which is already the bone's own axis, so there is no
+  // axis swap to do — only a roll. But one tool grip turned out not to be
+  // enough: a blade is held near its own end and a long shaft is held partway
+  // up, which is a different rotation AND a much bigger shift along the model.
+  // Hence two rows. An ITEM_MAP entry may name which with `grip: 'haft'`.
+  tool: { rot: [0, 180, 0], off: [-0.02, 0.15, -0.03] },     // blades
+  haft: { rot: [-100, 6, 92], off: [0.23, 0.12, -0.05] },    // shovel, hammer, torch
+};
+
+// Which family an item wants, when it is not obvious from the pack it is in.
+const HAFTED = new Set(['shovel', 'sledgehammer', 'torch']);
+
+function chooseProp(v) {
+  st.matCols = {}; st.glow = 0; st.stretch = {}; st.hiddenParts = [];
+  let entry = null;
+  if (!v) { st.prop = null; }
+  else if (v.startsWith('item:')) {
+    const e = entry = ITEM_MAP[v.slice(5)];
+    if (!e) { st.prop = null; $('propNote').textContent = 'no model for this item yet'; }
+    else {
+      st.prop = { dir: e.dir, name: e.of };
+      st.propLen = e.len;
+      st.matCols = Object.assign({}, e.cols || {});
+      st.glow = e.glow || 0;
+      st.stretch = JSON.parse(JSON.stringify(e.stretch || {}));
+      st.hiddenParts = (e.hide || []).slice();
+    }
+  } else {
+    const [g, n] = v.slice(4).split('|');
+    const gp = RAWDIR[g + '|' + n];
+    st.prop = { dir: gp.dir, name: n };
+    const tuned = RAW_TUNED[n];
+    st.propLen = tuned ? tuned.len : gp.m;
+    entry = tuned || null;
+    if (tuned) { st.matCols = Object.assign({}, tuned.cols || {}); st.glow = tuned.glow || 0; }
+  }
+  const itemKey = v && v.startsWith('item:') ? v.slice(5) : '';
+  const family = !(st.prop && st.prop.dir === SURV) ? 'gun'
+    : HAFTED.has(itemKey) ? 'haft' : 'tool';
+  const g = GRIPS[family];
+  st.rot = (entry && entry.rot) ? entry.rot.slice() : g.rot.slice();
+  st.off = (entry && entry.off) ? entry.off.slice() : g.off.slice();
+  for (const [id, v] of [['rotX', st.rot[0]], ['rotY', st.rot[1]], ['rotZ', st.rot[2]]]) $(id).value = String(v);
+  for (const [id, v] of [['offX', st.off[0]], ['offY', st.off[1]], ['offZ', st.off[2]]]) $(id).value = String(Math.round(v * 100));
+  $('lenSlider').value = String(Math.round(st.propLen * 100));
+  $('gloSlider').value = String(Math.round(st.glow * 100));
+  run(async () => { await attachProp(); });
+}
+
+$('propSel').onchange = e => chooseProp(e.target.value);
+$('boneSel').onchange = () => run(async () => { await attachProp(); });
+$('lenSlider').oninput = e => { st.propLen = +e.target.value / 100; placeProp(); };
+$('gloSlider').oninput = e => { st.glow = +e.target.value / 100; paintProp(); };
+for (const [id, i] of [['rotX', 0], ['rotY', 1], ['rotZ', 2]])
+  $(id).oninput = e => { st.rot[i] = +e.target.value; placeProp(); };
+for (const [id, i] of [['offX', 0], ['offY', 1], ['offZ', 2]])
+  $(id).oninput = e => { st.off[i] = +e.target.value / 100; placeProp(); };
+$('propMats').onclick = e => {
+  const btn = e.target.closest('[data-col]');
+  if (!btn) return;
+  const name = btn.parentElement.dataset.mat;
+  st.matCols[name] = btn.dataset.col || undefined;
+  if (!btn.dataset.col) delete st.matCols[name];
+  buildPropMats(); paintProp();
+};
+$('partSel').onchange = () => { syncStretchSliders(); shapeProp(); };
+for (const [id, i] of [['strX', 0], ['strY', 1], ['strZ', 2]]) {
+  $(id).oninput = e => {
+    const n = $('partSel').value;
+    if (!n) return;
+    const cur = (st.stretch[n] || [1, 1, 1]).slice();
+    cur[i] = +e.target.value / 100;
+    st.stretch[n] = cur;
+    shapeProp();
+  };
+}
+$('anchorBtn').onclick = e => {
+  st.anchor = st.anchor === 'base' ? 'centre' : 'base';
+  e.target.textContent = st.anchor === 'base' ? 'from base' : 'from centre';
+  e.target.classList.toggle('on', st.anchor === 'centre');
+  shapeProp();
+};
+$('hidePartBtn').onclick = () => {
+  const n = $('partSel').value;
+  if (!n) return;
+  const i = st.hiddenParts.indexOf(n);
+  if (i < 0) st.hiddenParts.push(n); else st.hiddenParts.splice(i, 1);
+  shapeProp();
+};
+$('strResetBtn').onclick = () => {
+  st.stretch = {}; st.hiddenParts = [];
+  syncStretchSliders(); shapeProp();
+};
+$('gloRow').onclick = e => {
+  const btn = e.target.closest('[data-col]');
+  if (!btn) return;
+  st.glowCol = btn.dataset.col;
+  buildPropMats(); paintProp();
+};
+// A GRIP IS A CONSTANT, NOT A SOLVE.
+//
+// The first attempt worked the rotation out from where the wrist happened to
+// be in the current pose — aim the barrel at the character's facing, invert the
+// bone's world rotation, done. It is wrong in principle: the prop is parented
+// to the bone, so it inherits the animation, and an offset derived from one
+// frame stops being right on the next. The offset has to be fixed in the
+// BONE's frame, which is the frame that moves with the hand.
+//
+// So these are constants, found by eye and then trimmed with the sliders. One
+// per grip, not one per item: everything held by a pistol grip shares a row.
+function gripFamily() {
+  const sel = $('propSel').value;
+  const key = sel.startsWith('item:') ? sel.slice(5) : '';
+  if (!(st.prop && st.prop.dir === SURV)) return 'gun';
+  return HAFTED.has(key) ? 'haft' : 'tool';
+}
+$('fitBtn').onclick = () => {
+  const g = GRIPS[gripFamily()];
+  st.rot = g.rot.slice();
+  st.off = g.off.slice();
+  for (const [id, v] of [['rotX', st.rot[0]], ['rotY', st.rot[1]], ['rotZ', st.rot[2]]]) $(id).value = String(v);
+  for (const [id, v] of [['offX', st.off[0]], ['offY', st.off[1]], ['offZ', st.off[2]]]) $(id).value = String(Math.round(v * 100));
+  placeProp();
+};
+$('copyBtn').onclick = () => {
+  if (!st.prop) return;
+  const sel = $('propSel').value;
+  const key = sel.startsWith('item:') ? sel.slice(5) : st.prop.name.toLowerCase();
+  const grip = GRIPS[gripFamily()];
+  const same = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  const bits = [`dir: ${st.prop.dir === SURV ? 'SURV' : 'GUNS'}`, `of: '${st.prop.name}'`,
+                `len: ${st.propLen.toFixed(2)}`];
+  // Only write out what differs from the shared grip — an entry repeating the
+  // default is a line that will not get updated when the default changes.
+  if (!same(st.rot, grip.rot)) bits.push(`rot: [${st.rot}]`);
+  if (!same(st.off, grip.off)) bits.push(`off: [${st.off.map(v => +v.toFixed(2))}]`);
+  if (Object.keys(st.matCols).length) bits.push(`cols: ${JSON.stringify(st.matCols)}`);
+  if (st.glow) bits.push(`glow: ${+st.glow.toFixed(2)}`);
+  if (Object.keys(st.stretch).length) bits.push(`stretch: ${JSON.stringify(st.stretch)}`);
+  if (st.hiddenParts.length) bits.push(`hide: ${JSON.stringify(st.hiddenParts)}`);
+  const t = `  ${key}: { ${bits.join(', ')} },`;
+  navigator.clipboard && navigator.clipboard.writeText(t);
+  $('propNote').textContent = t;
+};
+
+const animSel = $('animSel');
+// Dev hook for the browser console / automated checks.
+window.__dbg = () => {
+  let meshes = 0, visible = 0, heads = 0;
+  scene.traverse(c => { if (c.isMesh) { meshes++; if (c.visible) visible++; if (c.userData.isHead) heads++; } });
+  const ui = {
+    base: [...$('baseRow').children].find(b => b.classList.contains('on'))?.dataset.base,
+    tier: [...$('tierRow').children].find(b => b.classList.contains('on'))?.dataset.tier,
+    worn: [...$('slotRow').children].filter(b => b.classList.contains('on')).map(b => b.dataset.slot),
+    body: [...$('unlockRow').children].find(b => b.classList.contains('on'))?.dataset.body,
+    head: $('headSel').value,
+  };
+  let bones = [];
+  scene.traverse(c => { if (c.isSkinnedMesh && !bones.length) bones = c.skeleton.bones.map(b => b.name); });
+  return { bones, meshes, visible, grafted: grafted.length, heads, radius: +radius.toFixed(3),
+           parts: Object.fromEntries(SLOTS.map(k => [k, parts[k].length])), accessory: accessory.length,
+           eyes: eyeMeshes.size,
+           st: { base: st.base, head: st.head, body: st.body, tier: st.tier, eye: st.eye,
+                 worn: SLOTS.filter(k => st.worn[k]), hidden: [...st.hidden], pack: st.pack },
+           ui };
+};
+await build();
+showAngle();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

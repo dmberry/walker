@@ -1,0 +1,320 @@
+diff --git a/src/engine/input.js b/src/engine/input.js
+index ffb550a..86889fa 100644
+--- a/src/engine/input.js
++++ b/src/engine/input.js
+@@ -40,6 +40,11 @@ const TRACKED = new Set([
+   // into an HTML control is already guarded above, so this cannot eat a form.
+   'Enter', 'NumpadEnter',
+   'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
++  // F3 flips the 3D character on and off mid-run. Tracked rather than read off
++  // the window so preventDefault stops the browser's own find-again.
++  // The brackets size it while it is on, which is a thing you can only judge by
++  // standing next to a doorway and looking.
++  'F3', 'BracketLeft', 'BracketRight',
+ ]);
+ 
+ const POCKET_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4'];
+diff --git a/src/engine/renderer.js b/src/engine/renderer.js
+index 2153c4b..8f55488 100644
+--- a/src/engine/renderer.js
++++ b/src/engine/renderer.js
+@@ -27,6 +27,7 @@ import { drawBird } from '../game/birds.js';
+ import { drawRobot, beginUnitTags, setRobotNight } from '../game/robots.js';
+ import { drawWaterDroid } from '../game/waterdroids.js';
+ import { drawUnderworldCreature } from '../game/underworld.js';
++import * as char3d from './character3d.js';
+ import { FLOOR_TEXTURES, WALL_TEXTURES, GRASS_PATCH_TEXTURE, ROCK_TEXTURES, BOX_TEXTURES, BOAT_TEXTURES, SHIP_SPRITES, PART_SPRITES, CHARACTER_SPRITE_SETS, CHAR_COMPASS_DIRS, TREE_SHEET, TREE_SPRITES, EDGE_TEXTURE, SEA_TEXTURE, CAR_SPRITES, CAR_MODEL_KEYS, CAR_DIR_KEYS, CAR_RUIN_TEXTURE, FACTORY_TEXTURE, MARBLE_TEXTURE, PAPER_TEXTURE, GRAFFITI_TEXTURES } from './textures.js';
+ 
+ // The underworld floor palette: seven images, loaded here (not via textures.js)
+@@ -261,6 +262,22 @@ export class Renderer {
+   constructor(canvas) {
+     this.canvas = canvas;
+     this.ctx = canvas.getContext('2d');
++    // THE 3D CHARACTER, ON. It is the thing being tested, so it should be what
++    // you see when the page loads rather than something you have to know a key
++    // for. Nothing is risked by this: if WebGL will not start or the model will
++    // not load, char3d.ready() stays false and the baked sprites draw exactly
++    // as they always did. F3 turns it off to compare.
++    this.use3d = true;
++    // 1.0 puts the model at the same height as the PNG it replaces, and that is
++    // too small: the Kenney figure fills nearly all of its 64px frame while
++    // this one is framed with slack for a sword swing, so matching the frames
++    // does not match the people. 1.1 is David's, dialled in play against the
++    // tiles and the trees — my own guess of 1.5 was too big. [ and ] move it.
++    this.char3dScale = 1.1;
++    // How wide the shadow sits relative to the figure. [ and ] size the
++    // character; this is its own number because a shadow that scales exactly
++    // with height looks pinned to the feet.
++    this.char3dShadow = 1.15;
+     this.w = 0;
+     this.h = 0;
+     // Per-island obelisk colour (R1), set each frame from currentWorld by main.js.
+@@ -6771,6 +6788,10 @@ export class Renderer {
+         ctx.ellipse(c.x, c.y - 4, 7 * i, 3.5 * i, 0, 0, Math.PI * 2);
+         ctx.stroke();
+       }
++      // Chest-deep, and bobbing with the ripples. 0.42 down the figure puts the
++      // waterline just under the arms, which is where the sprite's own half-cut
++      // landed on a shorter, chunkier body.
++      if (this.drawPlayer3d(player, { x: c.x, y: c.y }, c.y - 2 + bobY + 14, 0.42)) return;
+       const set = CHARACTER_SPRITE_SETS[player.gender || 'm'];
+       // A BODY ON THE SAND DOES NOT TURN TO WATCH THE CURSOR. The sprite was
+       // picked from `facing`, which the mouse drives every frame, so a castaway
+@@ -6844,10 +6865,12 @@ export class Renderer {
+     const lift = (player.z || 0) * 32; // jump height in pixels
+     // Shadow stays grounded and shrinks as the player rises.
+     const sh = Math.max(0.45, 1 - (player.z || 0) * 0.9);
+-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+-    ctx.beginPath();
+-    ctx.ellipse(c.x, c.y, 10 * sh, 5 * sh, 0, 0, Math.PI * 2);
+-    ctx.fill();
++    if (!this.drawPlayerShadow3d(player, c, sh)) {
++      ctx.fillStyle = 'rgba(0,0,0,0.3)';
++      ctx.beginPath();
++      ctx.ellipse(c.x, c.y, 10 * sh, 5 * sh, 0, 0, Math.PI * 2);
++      ctx.fill();
++    }
+     const by = c.y - lift;
+ 
+     // The held item is drawn either behind or in front of the body depending
+@@ -7025,7 +7048,121 @@ export class Renderer {
+ 
+   // Draws the Kenney directional character set (m/f personas) in place of
+   // the procedural body/head — see the CHARACTER_SPRITE_SETS branch above.
++  // THE 3D CHARACTER, DRAWN INTO THE SAME SLOT AS THE SPRITE.
++  //
++  // Everything below this — the armour haze, the hurt tint, the idle sway — was
++  // written against a 64px PNG and still is. All this does is put a different
++  // image in the same rectangle: same feet, same scale, same place in the
++  // painter's order. If the pipeline is not up, it returns false and the sprite
++  // path underneath runs exactly as it always has.
++  // THE SILHOUETTE, LAID FLAT ON THE GROUND.
++  //
++  // character3d renders the posed figure from straight above. That view is in
++  // world axes, and the world's ground plane is drawn as a 2:1 diamond, so
++  // putting one on the other is exactly the isometric projection itself:
++  //
++  //     (x, y) -> ((x - y) * 32, (x + y) * 16)
++  //
++  // which factors into a 45 degree turn, a halving of the vertical, and a
++  // scale. Written as canvas transforms that is scale(1, 0.5), rotate(-45),
++  // scale(sqrt2) — innermost last, the order below.
++  //
++  // Returns false if the pipeline is down, and the ellipse takes over.
++  drawPlayerShadow3d(player, c, sh) {
++    if (!this.use3d || !char3d.ready()) return false;
++    const ctx = this.ctx;
++
++    // A SOFT PATCH, NOT A CUT-OUT. The cast silhouette is available and is
++    // strictly more correct — it has the arms in it — but at the size the
++    // character stands on screen its outline breaks into a smudge, and a
++    // smudge shaped like a person reads worse than a shape that is honestly
++    // just a shape. What actually grounds a figure is a dark contact patch
++    // under the feet fading out fast, so that is what this draws.
++    if (char3d.shadowActive()) {
++      const surf = char3d.shadowSurface();
++      if (surf) {
++        const span = (64 * 0.6 * 0.9 / 0.78) * this.char3dScale * this.char3dShadow;
++        ctx.save();
++        ctx.globalAlpha = 0.34 * sh;
++        ctx.translate(c.x, c.y);
++        ctx.scale(1, 0.5);
++        ctx.rotate(-Math.PI / 4);
++        ctx.scale(Math.SQRT2 * sh, Math.SQRT2 * sh);
++        ctx.drawImage(surf, -span / 2, -span / 2, span, span);
++        ctx.restore();
++        return true;
++      }
++    }
++
++    // Sized off the figure so it keeps up with char3dScale, and on the 2:1
++    // diamond the world is drawn on, so it lies flat rather than sitting up.
++    // A CONTACT SHADOW HAS A DARK CORE. The first version faded from 0.42 out
++    // to nothing across the whole radius, which is a wash rather than a shadow:
++    // measured on sand it moved the ground from 153 to 129, about a tenth, and
++    // he read as floating. What sells weight is a small, definitely dark patch
++    // where the boots meet the ground, going to nothing quickly around it.
++    const rx = 7.5 * this.char3dScale * this.char3dShadow * sh;
++    const ry = rx * 0.5;
++    const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, rx);
++    g.addColorStop(0.0, 'rgba(0,0,0,0.62)');
++    g.addColorStop(0.30, 'rgba(0,0,0,0.52)');
++    g.addColorStop(0.62, 'rgba(0,0,0,0.24)');
++    g.addColorStop(1.0, 'rgba(0,0,0,0)');
++    ctx.save();
++    ctx.translate(c.x, c.y);
++    ctx.scale(1, ry / rx);
++    ctx.translate(-c.x, -c.y);
++    ctx.fillStyle = g;
++    ctx.beginPath();
++    ctx.arc(c.x, c.y, rx, 0, Math.PI * 2);
++    ctx.fill();
++    ctx.restore();
++    return true;
++  }
++
++  drawPlayer3d(player, c, by, cut = null) {
++    if (!this.use3d || !char3d.ready()) return false;
++    const surf = char3d.surface();
++    if (!surf) return false;
++
++    // MATCH THE SPRITE'S APPARENT HEIGHT, not its frame.
++    //
++    // The PNG path draws a 64px frame at scale 0.6 — a 38.4px box — and the
++    // Kenney figure fills roughly nine tenths of it, so a character stands
++    // about 35px tall. The 3D tile is framed to FIT of its height (see
++    // character3d), so to put a figure of the same height on screen the tile
++    // has to be drawn at 35 / FIT. Getting this wrong is the difference between
++    // a swap you cannot see and a character who suddenly towers.
++    const FIGURE_PX = 64 * 0.6 * 0.9;
++    const size = (FIGURE_PX / 0.78) * this.char3dScale;
++    const foot = char3d.footFraction();
++    const ctx = this.ctx;
++    // FEET ON THE GROUND POINT, which is `by` — the same place the shadow is
++    // drawn. The sprite path sat its base 6px lower (cy = by - dh/2 + 6), a
++    // fudge that was invisible under a small dark blob and is not under a
++    // bigger figure: it put him six pixels below his own shadow.
++    const top = by - size * foot;
++    if (cut === null) {
++      ctx.drawImage(surf, c.x - size / 2, top, size, size);
++      return true;
++    }
++    // WAIST-DEEP. `cut` is how far down the FIGURE the waterline falls, 0 at
++    // the crown and 1 at the feet — not a fraction of the tile, because the
++    // tile carries slack above the head for a raised sword. Clipping rather
++    // than slicing the source keeps one code path: the same render, masked.
++    const figTop = top + size * (foot - 0.78);
++    const yCut = figTop + size * 0.78 * cut;
++    ctx.save();
++    ctx.beginPath();
++    ctx.rect(c.x - size / 2, top, size, Math.max(0, yCut - top));
++    ctx.clip();
++    ctx.drawImage(surf, c.x - size / 2, top, size, size);
++    ctx.restore();
++    return true;
++  }
++
+   drawPlayerSprite(player, c, by) {
++    if (this.drawPlayer3d(player, c, by)) return;
+     const ctx = this.ctx;
+     const set = CHARACTER_SPRITE_SETS[player.gender];
+     const dir = facingToCompassDir(player.facing);
+diff --git a/src/main.js b/src/main.js
+index 0acea8d..24206b8 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -72,6 +72,7 @@ import { placeTors, HERMES_DOCS, hermesTopics, virusFor, virusFilesFor, virusDoc
+ import { credentialText, FACTORY_BOAST, FACTORY_GRANT } from './game/credentials.js';   // #196: the card's files have bodies
+ import { archaicLs, archaicRead, isArchaicDir, OB_ARCHAIC_DIRS, OB_ARCHAIC_ABOUT } from './game/ob-archaic.js';   // #197: what the tower was before
+ import { VERSION } from './version.js';
++import * as char3d from './engine/character3d.js';
+ import { drawRobotVision } from './game/robotvision.js';
+ import { screenDirToWorld } from './engine/iso.js';
+ import { stampCoast } from './engine/coast.js';
+@@ -4327,6 +4328,9 @@ input.uiHitTest = (x, y) => {
+   return false;
+ };
+ 
++// The 3D character pipeline, reachable from the console while it is being
++// brought up: `__game.char3d.status()` says why it is not drawing.
++window.__char3d = char3d;
+ window.__game = { player, map, camera,
+   animals: currentWorld.animals, birds: currentWorld.birds, robots: currentWorld.robots,
+   waterdroids: currentWorld.waterdroids, obelisks: currentWorld.obelisks, obeliskObjs: currentWorld.obeliskObjs,
+@@ -11696,6 +11700,30 @@ function update(dt) {
+   tickLoveLetters(dt);
+   tickDayReturn(dt);
+   if (input.consumePress('KeyH')) toggleHelp();
++  // F3: the 3D character, on and off, mid-run. It is a comparison switch — the
++  // point is being able to flip between the baked sprite and the posed model
++  // while standing in the same spot, not a setting anybody keeps.
++  if (input.consumePress('F3')) {
++    renderer.use3d = !renderer.use3d;
++    if (renderer.use3d) {
++      char3d.start(CHARACTER_MODEL);
++      const why = char3d.status();
++      player.say(why ? `3D character: ${why}` : '3D character on');
++    } else {
++      player.say('3D character off');
++    }
++  }
++  // Size it in place. The right number is not one you can work out — the sprite
++  // it replaces is 64px at scale 0.6 and the model fills a different share of
++  // its own frame, so this is eye work, done standing beside a tree.
++  if (renderer.use3d) {
++    const step = (d) => {
++      renderer.char3dScale = Math.max(0.4, Math.min(3, +(renderer.char3dScale + d).toFixed(2)));
++      player.say(`character x${renderer.char3dScale.toFixed(2)}`);
++    };
++    if (input.consumePress('BracketRight')) step(0.05);
++    if (input.consumePress('BracketLeft')) step(-0.05);
++  }
+   if (input.inventoryPressed()) showBackpack = !showBackpack;
+   if (input.skillsPressed()) showSkills = !showSkills;
+   if (input.kleosPressed()) { showKleos = !showKleos; if (showKleos) kleosScope = 'run'; }
+@@ -13068,6 +13096,32 @@ function update(dt) {
+   }
+ }
+ 
++// WHICH CLIP THE PLAYER IS IN, from state the game already tracks.
++//
++// Nothing new is recorded for this. `swingTimer`, `hurtTimer`, `moving`,
++// `sprinting`, `resting` and what is in the hands are all already maintained
++// by the update loop for other reasons; this only reads them. Order matters —
++// a hit interrupts a swing, a swing interrupts a walk.
++const CHARACTER_MODEL = 'assets/models/adventurer-m.glb';
++let _lastCharPos = null;
++
++function pickCharacterClip(p) {
++  const C = char3d.CLIPS;
++  if (!p) return C.idle;
++  if (p.health <= 0) return C.death;
++  if (p.hurtTimer > 0) return C.hit;
++  const held = p.hands ? ITEMS[p.hands] : null;
++  const ranged = !!held && (held.kind === 'gun' || held.kind === 'gadget');
++  if (p.swingTimer > 0) {
++    if (ranged) return p.moving && char3d.hasClip(C.runShoot) ? C.runShoot : C.shoot;
++    return C.slash;
++  }
++  if (p.moving) return p.sprinting && char3d.hasClip(C.run) ? C.run : C.walk;
++  if (ranged && char3d.hasClip(C.idleGun)) return C.idleGun;
++  if (held && char3d.hasClip(C.idleSword)) return C.idleSword;
++  return C.idle;
++}
++
+ function frame(now) {
+   const elapsed = Math.min(0.25, (now - last) / 1000);
+   last = now;
+@@ -13100,6 +13154,32 @@ function frame(now) {
+   const canvasIdle = domPanelUp(obTermEl) || domPanelUp(nsEl) || domPanelUp(notebookEl);
+   const minRender = canvasIdle ? 120 : MIN_RENDER_MS;
+   if (now - lastRenderTime >= minRender) {
++    // POSE THE 3D CHARACTER JUST BEFORE THE WORLD IS PAINTED, and only when
++    // the world is actually going to be painted — this sits inside the render
++    // gate so a covered canvas does not spend a skinning pass per frame on a
++    // figure nobody can see. Costs one skinned mesh; there is only ever one
++    // player. No-ops entirely until the pipeline is up.
++    // Start it the first time it is wanted, rather than only from the F3 key —
++    // otherwise turning it on by default would show nothing until you pressed
++    // a key to load the thing that was already switched on.
++    if (renderer.use3d) char3d.start(CHARACTER_MODEL);
++    if (renderer.use3d && char3d.ready()) {
++      char3d.play(pickCharacterClip(player), 0.16);
++      // Worn only once it is found. player.backpack is null until then and null
++      // again on death, so the model follows the game rather than keeping its
++      // own copy of whether you have one.
++      char3d.setBackpack(!!player.backpack);
++      // Ground speed measured, not assumed: the distance actually covered since
++      // the last painted frame. Reading it this way picks up wading, foliage
++      // and torpor for free, where reading WALK_SPEED would not.
++      const stepDt = (now - lastRenderTime) / 1000;
++      let ground = null;
++      if (_lastCharPos && stepDt > 0) {
++        ground = Math.hypot(player.x - _lastCharPos.x, player.y - _lastCharPos.y) / stepDt;
++      }
++      _lastCharPos = { x: player.x, y: player.y };
++      char3d.update(stepDt, player.facing, ground);
++    }
+     lastRenderTime = now;
+     const amb = currentWorld.ambience;
+     renderer.obColor = currentWorld.obColor; renderer.obAlertColor = currentWorld.obAlertColor; // R1: per-island OB eye hue

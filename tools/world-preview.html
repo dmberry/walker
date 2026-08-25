@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Walker — world preview</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #8fb6c8;
+               font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eef2; }
+  canvas { display: block; }
+  #hud, #help {
+    position: fixed; background: rgba(16, 22, 28, 0.78); padding: 10px 12px;
+    border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); pointer-events: none;
+    white-space: pre; backdrop-filter: blur(3px);
+  }
+  #hud  { top: 12px; left: 12px; }
+  #help { bottom: 12px; left: 12px; color: #b7c7d2; }
+  #err  { position: fixed; top: 12px; right: 12px; max-width: 40ch; color: #ffb0a0;
+          background: rgba(40,12,12,0.85); padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; }
+  b { color: #ffd79a; font-weight: normal; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">loading…</div>
+<div id="help">WASD move   SHIFT run
+[ ] turn camera   - = zoom   P ortho/persp
+1 sword  2 gun  0 unarmed
+CLICK strike   SPACE jump
+E interact   V wave   H take a hit   X die
+L shading   K light   G grid
+, . walk pace   SHIFT , . run pace</div>
+<div id="err" hidden></div>
+
+<script type="module">
+// A WORLD FOR THE CHARACTER, not the character for a world.
+//
+// The figure was built to composite into NostOS's 2D isometric depth slot, and
+// it was pulled back out because that world is furnished for a different, much
+// squatter body. This file asks the other question: given a scene made of the
+// same asset family and lit once, at one angle, what does it look like?
+//
+// Everything here loads from the repo. three.js is the vendored r160, the props
+// are the Survival Pack OBJs already in sprites/, and the OBJ reader below is
+// forty lines rather than another 200 KB of loader.
+
+import * as THREE from '../vendor/three.module.min.js';
+import { GLTFLoader } from '../vendor/GLTFLoader.js';
+
+const fail = (m) => { const e = document.getElementById('err'); e.hidden = false; e.textContent += m + '\n'; };
+window.addEventListener('error', ev => fail(ev.message));
+
+// The true 2:1 isometric angle, atan(0.5) above the horizon. Kept as the
+// default because it is the projection the whole lineage of this work assumes;
+// P leaves it for a perspective camera, which is the thing a flat 2D world
+// could never offer.
+const ISO_ELEV_DEG = 26.565;
+
+// TWO DIFFERENT NUMBERS, and the first version conflated them.
+//
+// WALK_REF and RUN_REF are properties of the CLIPS: the ground speed each was
+// authored to look right at, so playing at that speed needs no rate change.
+// walkSpeed and runSpeed are properties of the GAME: how fast the figure
+// actually travels. Driving both from one value pinned the rate at 1 and made
+// the trim keys do nothing you could see.
+//
+// Held apart, the rate is just the ratio, so moving faster than the clip was
+// drawn for speeds the legs up to meet it.
+// MEASURED OFF THE CLIPS AT LOAD by measureRef() below, in metres per second at
+// TARGET_H. These are the fallbacks if that ever fails; they are what the
+// measurement returned, and the plan's guessed Walk of 2.6 was well under, which
+// is why the legs outran the ground.
+const REFS = { Walk: 3.56, Run: 7.00, Run_Shoot: 6.71 };
+// THE CLIP LEADS AND THE GROUND FOLLOWS. Driving the rate from a chosen speed
+// meant two numbers that had to agree and did not. Inverted, there is only one:
+// pace is the playback rate, the body travels at the clip's own measured speed
+// times that rate, and a planted foot is planted by construction rather than by
+// the references happening to be right.
+let walkPace = 1.30;
+let runPace  = 1.65;
+// Rate scaling keeps the feet planted at any speed — stride length is fixed and
+// only the cycle time moves — so these bounds are about when it stops LOOKING
+// right, not about when it stops being correct.
+const RATE_MIN = 0.35, RATE_MAX = 3.2;
+
+// ---------------------------------------------------------------- renderer --
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// THE SHADOW MAP IS NOT REDRAWN EVERY FRAME. Nothing in this world moves except
+// the figure, so re-rendering the whole scene into the depth map sixty times a
+// second was drawing the terrain, the trees and the rocks twice over for a
+// result that was almost always identical. It is refreshed only when the light
+// frustum has actually slid by a texel, or when the body has moved at all.
+renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.needsUpdate = true;
+
+const scene = new THREE.Scene();
+const SKY = 0x8fb6c8;
+scene.background = new THREE.Color(SKY);
+scene.fog = new THREE.Fog(SKY, 62, 150);
+
+const orthoCam = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 400);
+const perspCam = new THREE.PerspectiveCamera(32, 1, 0.1, 400);
+let ortho = true;
+const cam = () => ortho ? orthoCam : perspCam;
+
+// ------------------------------------------------------------------- light --
+// Three presets, because the plan flags art direction as undecided and it wants
+// deciding by eye. 0 is the overcast default; 1 is the hard low key the sprite
+// bake never had; 2 is near-noon, which flattens the figure and is here to show
+// what it costs.
+const hemi = new THREE.HemisphereLight(0xcfe4f2, 0x4a5240, 0.85);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xfff4e2, 1.5);
+key.castShadow = true;
+// WIDER THAN ANYTHING ON SCREEN. At ±26 the frustum was barely larger than the
+// visible ground, so a tree crossed its edge while you watched and its shadow
+// arrived a beat late. The span has to clear the view, not match it.
+const SHADOW_SPAN = 42;
+const SHADOW_MAP = 2048;
+key.shadow.mapSize.set(SHADOW_MAP, SHADOW_MAP);
+const SHADOW_TEXEL = (SHADOW_SPAN * 2) / SHADOW_MAP;
+const sc = key.shadow.camera;
+sc.left = -SHADOW_SPAN; sc.right = SHADOW_SPAN;
+sc.top = SHADOW_SPAN; sc.bottom = -SHADOW_SPAN;
+sc.near = 1; sc.far = 170;
+key.shadow.bias = 0;
+key.shadow.normalBias = 0.03;
+sc.updateProjectionMatrix();
+scene.add(key, key.target);
+const rim = new THREE.DirectionalLight(0x9fc0e8, 0.35);
+rim.position.set(-1.3, 0.9, -1.1);
+scene.add(rim);
+
+const LIGHTS = [
+  { name: 'overcast',  hemi: 0.85, key: 1.5, ang: [ -34, 42 ], rim: 0.35, sky: 0x8fb6c8 },
+  { name: 'hard low',  hemi: 0.45, key: 2.6, ang: [ -60, 18 ], rim: 0.55, sky: 0xa8c4cf },
+  { name: 'near noon', hemi: 0.95, key: 1.9, ang: [ -20, 74 ], rim: 0.15, sky: 0xa9cfe2 },
+];
+let lightIdx = 0;
+function applyLight() {
+  const L = LIGHTS[lightIdx];
+  hemi.intensity = L.hemi; key.intensity = L.key; rim.intensity = L.rim;
+  const a = THREE.MathUtils.degToRad(L.ang[0]), e = THREE.MathUtils.degToRad(L.ang[1]);
+  key.position.set(Math.sin(a) * Math.cos(e) * 40, Math.sin(e) * 40, Math.cos(a) * Math.cos(e) * 40);
+  scene.background.setHex(L.sky);
+  scene.fog.color.setHex(L.sky);
+}
+applyLight();
+
+// Deterministic, so the same field comes back on every reload and a change
+// you make is the only thing that moved.
+const rand = (() => { let s = 20260825; return () => (s = s * 16807 % 2147483647) / 2147483647; })();
+
+// ----------------------------------------------------------------- terrain --
+// Value noise, three octaves, written out rather than imported: it is a hash, a
+// smoothstep and a bilinear blend. Deterministic, so the same hills come back on
+// every reload.
+//
+// heightAt() is the single authority. The plane's vertices, every tree, rock,
+// tuft and prop, the figure's feet and the jump's landing all read it, so
+// nothing can disagree with the ground about where the ground is.
+const TERRAIN_AMP = 7.5;
+const TERRAIN_SCALE = 46;
+
+function hash2(i, j) {
+  // THE SHIFTS MUST BE UNSIGNED. With `>>`, the sign bit of n >> k matches the
+  // sign bit of n, so n ^ (n >> k) clears it every time and the hash spans
+  // [0, 0.5] rather than [0, 1]. The terrain then only ever dips: measured mean
+  // 0.244, max exactly 0.5, and hills that were holes.
+  let n = (i * 374761393 + j * 668265263) | 0;
+  n = (n ^ (n >>> 13)) * 1274126177 | 0;
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+}
+function fade(t) { return t * t * (3 - 2 * t); }
+function noise2(x, z) {
+  const i = Math.floor(x), j = Math.floor(z);
+  const fx = fade(x - i), fz = fade(z - j);
+  const a = hash2(i, j), b = hash2(i + 1, j), c = hash2(i, j + 1), d = hash2(i + 1, j + 1);
+  const lo = a + (b - a) * fx, hi = c + (d - c) * fx;
+  return lo + (hi - lo) * fz;
+}
+
+// Folding the field about its middle turns smooth humps into creases, which is
+// where the ridge lines come from. Squaring the result sharpens the crest and
+// leaves the flanks alone.
+function ridged(x, z) { return 1 - Math.abs(noise2(x, z) * 2 - 1); }
+
+// A CLIFF IS A HEIGHT THAT REFUSES TO INTERPOLATE. Quantise into bands and put
+// almost all of each band's rise into its last fraction: the ground reads as a
+// plateau, then a face, then the next plateau. `sharp` is how abrupt the face
+// is; 1 gives the smooth ground back.
+function terrace(h, step, sharp) {
+  const q = Math.floor(h / step);
+  const f = h / step - q;
+  return (q + Math.pow(f, sharp)) * step;
+}
+
+// RELIEF VARIES ACROSS COUNTRY. One amplitude everywhere gives ground that is
+// busy at every scale and never rests: nowhere to pitch a camp, nowhere that
+// reads as a floor. This is a very slow field that says how hilly each part of
+// the map is, and everything else is multiplied by it — so there are plains,
+// and there is hill country, and the ridges and cliffs only happen in the
+// second. Squaring it puts more of the map at the flat end.
+function relief(x, z) {
+  const r = noise2(x / (TERRAIN_SCALE * 3.2) + 71.3, z / (TERRAIN_SCALE * 3.2) - 40.7);
+  const t = Math.min(1, Math.max(0, (r - 0.30) / 0.55));
+  return t * t * (3 - 2 * t);
+}
+
+function heightAt(x, z) {
+  const S = TERRAIN_SCALE;
+  const R = relief(x, z);
+
+  let h = (noise2(x / S, z / S) - 0.5) * 2;
+  h += (noise2(x / (S * 0.45) + 11.3, z / (S * 0.45) - 7.1) - 0.5) * 2 * 0.45;
+  h += (noise2(x / (S * 0.17) - 3.7, z / (S * 0.17) + 19.4) - 0.5) * 2 * 0.18;
+  // A plain is not a table: 0.10 keeps a slow swell in the flattest country.
+  h *= TERRAIN_AMP * (0.10 + R * 1.05);
+
+  // Ridges and bluffs, in hill country only.
+  h += Math.pow(ridged(x / (S * 1.35) + 53.1, z / (S * 1.35) + 17.7), 2.2) * TERRAIN_AMP * 1.55 * R;
+
+  // Terracing only where a slow mask asks for it AND there is relief to cut
+  // into, so cliffs belong to some country rather than being a texture over all
+  // of it.
+  const mask = noise2(x / (S * 2.1) - 31.0, z / (S * 2.1) + 9.0) * R;
+  if (mask > 0.44) {
+    const k = Math.min(1, (mask - 0.44) / 0.22);
+    h = h * (1 - k) + terrace(h, 1.8, 4.5) * k;
+  }
+
+  // The camp reads as a clearing, and a tent pitched on a slope does not. Level
+  // the middle and let the country come up again outside it.
+  const d = Math.hypot(x, z);
+  const t = Math.min(1, Math.max(0, (d - 9) / 14));
+  return h * fade(t);
+}
+
+// The steepest thing the figure will walk up. Past this a face is a wall, which
+// is what makes a cliff a cliff rather than a ramp — SPACE is the way over.
+const MAX_CLIMB = Math.tan(THREE.MathUtils.degToRad(46));
+// Test the slope over a FIXED distance, not over one frame's travel. Measured
+// across the 8 cm a frame covers, a terrace face reads as a near-infinite
+// gradient from a long way off and the figure stops dead in open ground; worse,
+// he could end up somewhere every direction failed and stay there.
+const LOOKAHEAD = 0.55;
+// Anything under this is a step, whatever the gradient says, so kerbs and roots
+// do not need a run-up.
+const STEP_UP = 0.45;
+
+// ------------------------------------------------------------------ tracks --
+// PAINTED INTO THE GROUND, NOT LAID OVER IT. The first version was a ribbon of
+// quads floating 5 cm above the surface, and it vanished: its quads are wider
+// than the terrain's triangles, so on any convexity the ribbon's flat chord
+// cuts below the interpolated ground. Lifting it clear only makes it hover.
+//
+// A world-space texture has no such problem. It also gives an edge as fine as
+// the canvas rather than as coarse as the mesh.
+const WORLD = 240;             // the ground plane is WORLD x WORLD, centred
+const TRACK_WIDTH = 2.1;       // metres
+
+// A PATH IS NOT A LINE ON A MAP. It is where feet found the easy way, so it
+// contours: it will go a long way sideways to avoid a short climb, and it takes
+// a hill in traverses rather than straight up the face.
+//
+// So the trail is walked rather than drawn. At each step, look at a fan of
+// headings, and score each by how steep it is and how far it has strayed from
+// where the path is meant to be going. Steepness dominates, which is what makes
+// it bend around a slope instead of over it.
+const TRAIL_STEP = 1.5;
+const TRAIL_GRADE = 0.16;      // about 9°, above which the cost climbs sharply
+
+function trailFrom(angle, length) {
+  const ux = Math.cos(angle), uz = Math.sin(angle);
+  const pts = [[0, 0]];
+  let x = 0, z = 0, heading = angle, along = 0;
+  // EVERY STEP MUST GET ON. Scoring only steepness against bearing drift, the
+  // walker found that the flattest ground anywhere was the levelled camp it
+  // started in, and spent the whole trail circling inside it. Requiring the
+  // projection onto the bearing to increase makes the path leave, and turns the
+  // steepness term into what it should be: a reason to go around, not to stop.
+  while (along < length) {
+    const h0 = heightAt(x, z);
+    let best = null;
+    for (let k = -6; k <= 6; k++) {
+      const a = heading + k * 0.11;
+      const nx = x + Math.cos(a) * TRAIL_STEP, nz = z + Math.sin(a) * TRAIL_STEP;
+      const nAlong = nx * ux + nz * uz;
+      if (nAlong <= along + 0.12) continue;
+      const lateral = Math.abs(nz * ux - nx * uz);   // how far off the bearing
+      const grade = Math.abs(heightAt(nx, nz) - h0) / TRAIL_STEP;
+      const cost = Math.max(0, grade - TRAIL_GRADE) * 26   // the steep penalty
+                 + grade * 2.0                             // mild everywhere
+                 + lateral * 0.09                          // drawn back to line
+                 + Math.abs(k) * 0.05                      // prefer straight
+                 + (noise2(nx * 0.09, nz * 0.09) - 0.5) * 0.6;
+      if (!best || cost < best.cost) best = { cost, a, nx, nz, nAlong };
+    }
+    if (!best) break;
+    heading = best.a; x = best.nx; z = best.nz; along = best.nAlong;
+    pts.push([x, z]);
+  }
+  return pts;
+}
+
+const TRACKS = [trailFrom(0.4, 78), trailFrom(2.5, 70), trailFrom(4.2, 82), trailFrom(5.6, 58)];
+const trackPts = TRACKS.flat();
+
+// Nothing grows in a path. Used to keep tufts, trees and rocks off them.
+function onTrack(x, z, pad) {
+  const r = (TRACK_WIDTH / 2 + pad) ** 2;
+  for (let i = 0; i < trackPts.length; i++) {
+    const dx = x - trackPts[i][0], dz = z - trackPts[i][1];
+    if (dx * dx + dz * dz < r) return true;
+  }
+  return false;
+}
+
+// ------------------------------------------------------------------ ground --
+// AN UNTEXTURED PLANE HAS NO SPEED. Running across a flat fill looks identical
+// to standing still on one, because nothing passes underfoot — the figure's legs
+// were the only thing reporting motion, which reads as the ground being stuck.
+// Mottling is enough; it needs features, not detail.
+function groundTexture() {
+  const N = 2048;                    // 240 m across, so about 12 cm a texel
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = N;
+  const g = cv.getContext('2d');
+  const P = N / WORLD;               // pixels per metre
+  const toX = x => (x + WORLD / 2) * P;
+  const toY = z => (z + WORLD / 2) * P;   // three flips v, so +z is +canvas-y
+
+  g.fillStyle = '#6f8f4e';
+  g.fillRect(0, 0, N, N);
+  for (let i = 0; i < 1500; i++) {
+    const r = (2 + rand() * 9) * P;
+    g.fillStyle = 'hsla(' + (78 + rand() * 26) + ',' + (24 + rand() * 20) + '%,' + (38 + rand() * 26) + '%,0.5)';
+    g.beginPath();
+    g.ellipse(rand() * N, rand() * N, r, r * (0.55 + rand() * 0.6), rand() * 3.14, 0, 6.29);
+    g.fill();
+  }
+  for (let i = 0; i < 42000; i++) {
+    g.fillStyle = 'rgba(' + (30 + rand() * 60 | 0) + ',' + (50 + rand() * 60 | 0) + ',' + (20 + rand() * 40 | 0) + ',0.30)';
+    g.fillRect(rand() * N, rand() * N, 1 + rand() * 3, 1 + rand() * 3);
+  }
+
+  // Chalk, the way a Downs path reads: worn through rather than laid down.
+  //
+  // Two earlier versions failed here. The first drew it like a road, one hard
+  // pale stripe with an edge. The second leaned on the canvas blur filter and
+  // low alpha, and the path all but disappeared — measured on-path (127,167,94)
+  // against off-path (139,183,111), which is to say no path at all.
+  //
+  // Softness comes from stacking instead: five strokes, widest and faintest
+  // first, so the edge falls away through the stack and the middle builds up.
+  // No filter involved, and the result can be checked by reading the pixels.
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  const stroke = (pts, w, col, from = 0, to = 1) => {
+    g.strokeStyle = col;
+    g.lineWidth = w * P;
+    const a = Math.floor(from * (pts.length - 1)), b = Math.ceil(to * (pts.length - 1));
+    g.beginPath();
+    g.moveTo(toX(pts[a][0]), toY(pts[a][1]));
+    for (let i = a + 1; i <= b; i++) g.lineTo(toX(pts[i][0]), toY(pts[i][1]));
+    g.stroke();
+  };
+
+  for (const pts of TRACKS) {
+    // Take the green out first. A translucent pale layer over saturated turf
+    // only ever makes lighter turf; draining the saturation is the difference
+    // between paler grass and bare ground.
+    g.globalCompositeOperation = 'saturation';
+    g.globalAlpha = 0.85;
+    stroke(pts, TRACK_WIDTH * 1.9, 'hsl(0,0%,50%)');
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+
+    for (const [w, a] of [[2.45, 0.09], [1.75, 0.13], [1.25, 0.17], [0.85, 0.19], [0.50, 0.17]]) {
+      stroke(pts, TRACK_WIDTH * w, 'rgba(207,204,191,' + a + ')');
+    }
+    // A trail is not uniform. A few stretches take more wear than the rest,
+    // which breaks the stripe up without drawing an edge anywhere.
+    for (let k = 0; k < 8; k++) {
+      const from = rand() * 0.85, to = Math.min(1, from + 0.04 + rand() * 0.10);
+      stroke(pts, TRACK_WIDTH * (0.35 + rand() * 0.5),
+             'rgba(216,213,199,' + (0.10 + rand() * 0.12).toFixed(2) + ')', from, to);
+    }
+  }
+
+  // Grit, sparse and low-contrast — enough to break the fill up close and
+  // invisible at walking distance.
+  for (let i = 0; i < 1800; i++) {
+    const pts = TRACKS[(rand() * TRACKS.length) | 0];
+    const k = (rand() * (pts.length - 1)) | 0;
+    const off = (rand() - 0.5) * TRACK_WIDTH * 0.9;
+    g.fillStyle = 'rgba(' + (128 + rand() * 70 | 0) + ',' + (126 + rand() * 68 | 0) + ',' + (112 + rand() * 62 | 0) + ',0.28)';
+    g.fillRect(toX(pts[k][0] + off), toY(pts[k][1] + off * 0.4), 1 + rand() * 2, 1 + rand() * 2);
+  }
+
+  const t = new THREE.CanvasTexture(cv);
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: groundTexture() });
+const groundGeo = new THREE.PlaneGeometry(240, 240, 288, 288);
+{
+  // The mesh is turned -90° about X, so a local (x, y) lands at world (x, -y)
+  // and the local +z the vertices are pushed along becomes world up.
+  const a = groundGeo.attributes.position;
+  for (let i = 0; i < a.count; i++) a.setZ(i, heightAt(a.getX(i), -a.getY(i)));
+  a.needsUpdate = true;
+  groundGeo.computeVertexNormals();
+}
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// The 2:1 lattice, turned 45 degrees so it reads as the isometric grid the old
+// world was drawn on. Off by default; G brings it back when you want to know
+// whether a tile-based world would still fit under this.
+const grid = new THREE.GridHelper(240, 120, 0x000000, 0x000000);
+grid.material.opacity = 0.08;
+grid.material.transparent = true;
+grid.rotation.y = Math.PI / 4;
+grid.position.y = 0.01;
+grid.visible = false;
+scene.add(grid);
+
+// ------------------------------------------------------------- OBJ reading --
+// Quaternius ships these as position + normal + usemtl, no UVs and no textures,
+// so the whole reader is a vertex list, a normal list and a fan triangulation.
+// Kd is linear, which is why the colour is set in linear-sRGB and not by hex.
+function parseMTL(text) {
+  const mats = new Map();
+  let cur = null;
+  for (const raw of text.split('\n')) {
+    const p = raw.trim().split(/\s+/);
+    if (p[0] === 'newmtl') { cur = { kd: [0.8, 0.8, 0.8] }; mats.set(p.slice(1).join(' '), cur); }
+    else if (cur && p[0] === 'Kd') cur.kd = [+p[1], +p[2], +p[3]];
+  }
+  return mats;
+}
+
+function parseOBJ(text, mats) {
+  const V = [], N = [], groups = new Map();
+  let cur = 'default';
+  const bucket = () => {
+    if (!groups.has(cur)) groups.set(cur, { pos: [], nor: [] });
+    return groups.get(cur);
+  };
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line[0] === '#') continue;
+    const p = line.split(/\s+/);
+    if (p[0] === 'v') V.push([+p[1], +p[2], +p[3]]);
+    else if (p[0] === 'vn') N.push([+p[1], +p[2], +p[3]]);
+    else if (p[0] === 'usemtl') cur = p.slice(1).join(' ');
+    else if (p[0] === 'f') {
+      const fan = p.slice(1).map(tok => {
+        const bits = tok.split('/');
+        const vi = +bits[0], ni = bits[2] ? +bits[2] : 0;
+        return {
+          v: V[vi > 0 ? vi - 1 : V.length + vi],
+          n: ni ? N[ni > 0 ? ni - 1 : N.length + ni] : null,
+        };
+      });
+      const b = bucket();
+      for (let i = 1; i < fan.length - 1; i++) {
+        for (const w of [fan[0], fan[i], fan[i + 1]]) {
+          if (!w.v) continue;
+          b.pos.push(w.v[0], w.v[1], w.v[2]);
+          if (w.n) b.nor.push(w.n[0], w.n[1], w.n[2]);
+        }
+      }
+    }
+  }
+  const out = new THREE.Group();
+  for (const [name, b] of groups) {
+    if (!b.pos.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3));
+    if (b.nor.length === b.pos.length) geo.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3));
+    else geo.computeVertexNormals();
+    const kd = (mats.get(name) || { kd: [0.8, 0.8, 0.8] }).kd;
+    const col = new THREE.Color().setRGB(kd[0], kd[1], kd[2], THREE.LinearSRGBColorSpace);
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: col }));
+    mesh.name = name;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    out.add(mesh);
+  }
+  return out;
+}
+
+const SURV = '../sprites/Survival Pack - Sept 2020/OBJ/';
+const GUNS = '../sprites/Ultimate Gun Pack - July 2019/OBJ/';
+const PROP_DIR = SURV;
+async function loadProp(name, dir = PROP_DIR) {
+  const [m, o] = await Promise.all([
+    fetch(encodeURI(dir + name + '.mtl')).then(r => r.text()),
+    fetch(encodeURI(dir + name + '.obj')).then(r => r.text()),
+  ]);
+  return parseOBJ(o, parseMTL(m));
+}
+
+// Props arrive at whatever size Blender left them, so each is normalised to a
+// height in metres and dropped so its lowest vertex sits on the ground.
+function place(obj, x, z, height, yaw = 0) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const s = height / (size.y || 1);
+  obj.scale.setScalar(s);
+  obj.position.set(x, heightAt(x, z) - box.min.y * s, z);
+  obj.rotation.y = yaw;
+  scene.add(obj);
+  return obj;
+}
+
+// --------------------------------------------------------------- scenery ----
+// Trees and rocks are made here rather than sourced, so the scene stands up
+// with nothing but what the repo already holds. Flat-shaded cones on a trunk is
+// the same register the Quaternius packs are drawn in.
+function tree(x, z) {
+  const g = new THREE.Group();
+  const h = 3.6 + rand() * 2.6;
+  const trunkH = h * 0.34;
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(h * 0.035, h * 0.055, trunkH, 6),
+    new THREE.MeshLambertMaterial({ color: 0x6b4b2f, flatShading: true }));
+  trunk.position.y = trunkH / 2;
+  g.add(trunk);
+  // DARKER AND BLUER THAN THE GROUND ON PURPOSE. At the first pass the canopy
+  // sat inside the ground's own range, so on a shaded slope a whole tree
+  // disappeared and left its trunk standing on its own — it read as a field of
+  // bare poles, and the trees turned out to be perfectly intact.
+  const green = new THREE.Color().setHSL(0.30 + rand() * 0.05, 0.46, 0.17 + rand() * 0.07);
+  for (let i = 0; i < 3; i++) {
+    const r = h * (0.30 - i * 0.07);
+    const c = new THREE.Mesh(
+      new THREE.ConeGeometry(r, h * 0.34, 7),
+      new THREE.MeshLambertMaterial({ color: green, flatShading: true }));
+    c.position.y = trunkH + h * 0.16 + i * h * 0.20;
+    g.add(c);
+  }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.position.set(x, heightAt(x, z), z);
+  g.rotation.y = rand() * Math.PI * 2;
+  scene.add(g);
+  return g;
+}
+
+function rock(x, z) {
+  const r = 0.28 + rand() * 0.7;
+  const m = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(r, 0),
+    new THREE.MeshLambertMaterial({ color: 0x8a8b84, flatShading: true }));
+  m.position.set(x, heightAt(x, z) + r * 0.55, z);
+  m.rotation.set(rand() * 3, rand() * 3, rand() * 3);
+  m.scale.y = 0.7;
+  m.castShadow = true; m.receiveShadow = true;
+  scene.add(m);
+  return m;
+}
+
+// Tufts. Small, dense and close to the ground, they are what actually sells
+// speed at running pace — the texture reads at a distance, these read underfoot.
+const tuftGeo = new THREE.ConeGeometry(0.055, 0.17, 4);
+const tuftMat = new THREE.MeshLambertMaterial({ color: 0x5f7f3e, flatShading: true });
+const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 1600);
+tufts.castShadow = false;
+tufts.receiveShadow = true;
+{
+  const m = new THREE.Object3D();
+  for (let i = 0; i < tufts.count; i++) {
+    const a = rand() * Math.PI * 2, d = rand() * 58;
+    const tx = Math.cos(a) * d, tz = Math.sin(a) * d;
+    if (onTrack(tx, tz, 0.25)) { m.scale.setScalar(0); m.updateMatrix(); tufts.setMatrixAt(i, m.matrix); continue; }
+    m.position.set(tx, heightAt(tx, tz) + 0.075, tz);
+    m.rotation.set(0, rand() * 6.28, (rand() - 0.5) * 0.5);
+    m.scale.setScalar(0.6 + rand() * 0.8);
+    m.updateMatrix();
+    tufts.setMatrixAt(i, m.matrix);
+  }
+  tufts.instanceMatrix.needsUpdate = true;
+}
+scene.add(tufts);
+
+const scenery = [];
+for (let i = 0; i < 46; i++) {
+  const a = rand() * Math.PI * 2, d = 9 + rand() * 44;
+  const x = Math.cos(a) * d, z = Math.sin(a) * d;
+  if (onTrack(x, z, 1.6)) continue;
+  scenery.push(tree(x, z));
+}
+for (let i = 0; i < 40; i++) {
+  const a = rand() * Math.PI * 2, d = 5 + rand() * 46;
+  const x = Math.cos(a) * d, z = Math.sin(a) * d;
+  if (onTrack(x, z, 0.9)) continue;
+  scenery.push(rock(x, z));
+}
+
+// A camp, so there is somewhere for the figure to be rather than an empty
+// field. Heights are in metres and are what the props are being asked to be,
+// not what they were modelled as.
+const CAMP = [
+  ['Tent',          -4.2,  -2.6, 2.10,  0.6 ],
+  ['Bonfire',        0.0,   0.0, 0.55,  0.0 ],
+  ['Bonfire_Fire',   0.0,   0.0, 0.95,  0.0 ],
+  ['WoodLog',        2.4,  -1.4, 0.34,  1.1 ],
+  ['WoodLog',        2.7,  -1.0, 0.34,  0.3 ],
+  ['WoodLog',       -2.1,   2.3, 0.34,  2.2 ],
+  ['Backpack',       1.5,   1.9, 0.55,  2.7 ],
+  ['Trashcan',       5.6,   3.1, 0.90,  0.4 ],
+  ['PropaneTank',    4.9,  -3.7, 0.78,  1.5 ],
+  ['GasCan',         5.4,  -3.0, 0.42,  0.9 ],
+  ['Pot',           -1.1,  -1.3, 0.30,  0.0 ],
+  ['Axe',            2.6,  -1.3, 0.74,  1.9 ],
+  ['Shovel',        -5.6,   1.4, 1.10,  0.7 ],
+  ['BearTrap_Open',  7.4,   0.6, 0.20,  2.4 ],
+  ['Raft',          -8.4,  -6.0, 0.34,  0.35],
+];
+let propsLoaded = 0;
+for (const [name, x, z, h, yaw] of CAMP) {
+  loadProp(name)
+    .then(g => { place(g, x, z, h, yaw); propsLoaded++; })
+    .catch(() => fail('prop missing: ' + name));
+}
+
+// ------------------------------------------------------------- character ----
+const TARGET_H = 1.75;   // metres; the world is built at this scale
+let root = null, mixer = null, current = null, locked = false, modelH = 0, rawH = 0;
+const clips = new Map();
+const charMeshes = [];
+
+new GLTFLoader().load('../models/adventurer-m.glb', gltf => {
+  root = gltf.scene;
+  root.traverse(o => {
+    if (o.isMesh || o.isSkinnedMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      o.frustumCulled = false;
+      charMeshes.push(o);
+    }
+  });
+  const box = new THREE.Box3().setFromObject(root);
+  rawH = box.max.y - box.min.y;
+  // AUTHORED AT 0.65 UNITS, NOT 1.8. Every prop height in this file is a real
+  // measurement in metres, so the figure is scaled to meet them rather than the
+  // world being scaled down to meet it.
+  root.scale.setScalar(TARGET_H / rawH);
+  modelH = TARGET_H;
+  scene.add(root);
+  mixer = new THREE.AnimationMixer(root);
+  for (const c of gltf.animations) clips.set(c.name, c);
+  mixer.addEventListener('finished', () => { locked = false; });
+  for (const name of Object.keys(REFS)) {
+    const m = measureRef(name);
+    if (m) REFS[name] = +(m.refSpeed * root.scale.x).toFixed(2);
+  }
+  play('Idle');
+  if (pendingHeld) { const k = pendingHeld; pendingHeld = null; setHeld(k); }
+}, undefined, e => fail('model: ' + (e && e.message ? e.message : e)));
+
+// ------------------------------------------------------------- held item ----
+// The plan worked these constants out in the previewer and then nothing used
+// them: §6 says the held item "is still a flat icon at an approximated hand".
+// Here it is a real model on the real joint, which is why a blade crossing the
+// torso mid-slash occludes instead of popping in front.
+//
+// `rot` and `off` are in the BONE's own frame and are copied from the plan
+// unchanged. `len` is the finished length in metres, which is why the scale
+// below divides out the bone's accumulated world scale rather than trusting the
+// bone frame to be life-sized.
+const HELD = {
+  sword: { dir: SURV, of: 'Knife',    len: 0.61, rot: [12, -174, -15], off: [-0.02, 0.16, -0.03] },
+  gun:   { dir: GUNS, of: 'Pistol_1', len: 0.22, rot: [180, 180, -90], off: [-0.02, 0.14, -0.02] },
+};
+let heldGroup = null, heldKind = null, pendingHeld = null;
+const heldCache = new Map();
+
+// THREE.JS DELETES THE DOT. PropertyBinding.sanitizeNodeName treats it as a path
+// separator, so the rig's `Wrist.R` arrives as `WristR` — not `Wrist_R`. Compare
+// with everything non-alphanumeric stripped, and ask the SKELETON for the joint:
+// GLTFLoader does not promise the bones hang under the mesh's node.
+function findBone(want) {
+  const norm = n => String(n).replace(/[^a-z0-9]/gi, '').toLowerCase();
+  let skel = null;
+  root.traverse(c => { if (c.isSkinnedMesh && !skel) skel = c.skeleton; });
+  const target = norm(want);
+  if (skel) { const b = skel.bones.find(x => norm(x.name) === target); if (b) return b; }
+  let found = null;
+  root.traverse(c => { if (c.isBone && !found && norm(c.name) === target) found = c; });
+  return found;
+}
+
+async function setHeld(kind) {
+  // A stance chosen before the model arrives used to be dropped on the floor:
+  // the pose caught up when the clips loaded but the hand stayed empty, because
+  // nothing asked again. Remember it and let the load apply it.
+  if (!root) { pendingHeld = kind; return; }
+  if (kind === heldKind) return;
+  heldKind = kind;
+  if (heldGroup) { heldGroup.removeFromParent(); heldGroup = null; }
+  const spec = HELD[kind];
+  if (!spec) return;
+
+  const cacheKey = spec.dir + spec.of;
+  if (!heldCache.has(cacheKey)) heldCache.set(cacheKey, await loadProp(spec.of, spec.dir));
+  if (heldKind !== kind) return;              // stance changed while loading
+
+  const bone = findBone('Wrist.R');
+  if (!bone) { fail('no Wrist.R on the rig'); return; }
+
+  const obj = heldCache.get(cacheKey).clone(true);
+  obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
+
+  const size = new THREE.Vector3();
+  new THREE.Box3().setFromObject(obj).getSize(size);
+  const span = Math.max(size.x, size.y, size.z) || 1;
+
+  // The joint carries the whole chain's scale, so a length in metres has to be
+  // divided by it to survive the trip down the hierarchy.
+  bone.updateMatrixWorld(true);
+  const boneScale = new THREE.Vector3().setFromMatrixScale(bone.matrixWorld);
+  const s = spec.len / (span * ((boneScale.x + boneScale.y + boneScale.z) / 3));
+
+  heldGroup = new THREE.Group();
+  heldGroup.add(obj);
+  heldGroup.scale.setScalar(s);
+  heldGroup.rotation.set(...spec.rot.map(THREE.MathUtils.degToRad));
+  heldGroup.position.set(spec.off[0], spec.off[1], spec.off[2]);
+  bone.add(heldGroup);
+}
+
+function play(name, once = false, fade = 0.18) {
+  const clip = clips.get(name);
+  if (!clip) return;
+  const next = mixer.clipAction(clip);
+  if (next === current && !once) return;
+  next.reset();
+  next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+  next.clampWhenFinished = once;
+  next.fadeIn(fade).play();
+  if (current && current !== next) current.fadeOut(fade);
+  current = next;
+  if (once) locked = true;
+}
+
+// ------------------------------------------------------------------ input ---
+const held = new Set();
+let stance = 'none';            // none | sword | gun
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  held.add(k);
+  if (k === '[') azi -= Math.PI / 4;
+  if (k === ']') azi += Math.PI / 4;
+  if (k === '-') dist = Math.min(30, dist * 1.14);
+  if (k === '=' || k === '+') dist = Math.max(3.5, dist / 1.14);
+  if (k === 'p') ortho = !ortho;
+  if (k === 'g') grid.visible = !grid.visible;
+  if (k === 'l') { shading = (shading + 1) % 3; applyShading(); }
+  if (k === 'k') { lightIdx = (lightIdx + 1) % LIGHTS.length; applyLight(); }
+  if (k === ',' || k === '.') {
+    const d = (k === '.' ? 1 : -1) * 0.05;
+    if (held.has('shift')) runPace = Math.max(0.3, +(runPace + d).toFixed(2));
+    else walkPace = Math.max(0.3, +(walkPace + d).toFixed(2));
+  }
+  if (k === '1') { stance = 'sword'; setHeld('sword'); }
+  if (k === '2') { stance = 'gun';   setHeld('gun'); }
+  if (k === '0') { stance = 'none';  setHeld('none'); }
+  if (!mixer) return;
+  if (k === ' ') { e.preventDefault(); if (!airborne) { airborne = true; jumpV = JUMP_V; } }
+  if (k === 'e') play('Interact', true);
+  if (k === 'v') play('Wave', true);
+  if (k === 'h') play('HitRecieve', true, 0.06);
+  if (k === 'x') play('Death', true, 0.1);
+});
+addEventListener('keyup', e => held.delete(e.key.toLowerCase()));
+
+// Click strikes. The canvas takes the mousedown so the page does not select
+// text behind it on a fast double.
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0 || !mixer) return;
+  e.preventDefault();
+  play(stance === 'gun' ? 'Gun_Shoot' : 'Sword_Slash', true, 0.08);
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ----------------------------------------------------------------- shading --
+// The plan leaves art direction open and says it wants deciding by eye at real
+// size. Cycling this against the light presets is that decision, made visible.
+const SHADING = ['smooth', 'flat', 'toon'];
+let shading = 0;
+function applyShading() {
+  const mode = SHADING[shading];
+  for (const m of charMeshes) {
+    const old = m.material;
+    const col = old.color.clone();
+    const skinned = m.isSkinnedMesh;
+    let next;
+    if (mode === 'toon') next = new THREE.MeshToonMaterial({ color: col });
+    else next = new THREE.MeshLambertMaterial({ color: col, flatShading: mode === 'flat' });
+    next.skinning = skinned;
+    m.material = next;
+    old.dispose();
+  }
+}
+
+// ------------------------------------------------------------------ camera --
+let azi = Math.PI / 4;
+const elev = THREE.MathUtils.degToRad(ISO_ELEV_DEG);
+let dist = 11.0;      // half-height in metres; dialled in play, not derived
+const target = new THREE.Vector3(0, 1, 0);
+const camPos = new THREE.Vector3();
+
+function aim() {
+  const back = 70;
+  camPos.set(
+    target.x + Math.sin(azi) * Math.cos(elev) * back,
+    target.y + Math.sin(elev) * back,
+    target.z + Math.cos(azi) * Math.cos(elev) * back
+  );
+  const c = cam();
+  c.position.copy(camPos);
+  c.lookAt(target);
+  if (ortho) {
+    const a = innerWidth / innerHeight;
+    c.left = -dist * a; c.right = dist * a; c.top = dist; c.bottom = -dist;
+  } else {
+    c.fov = 2 * THREE.MathUtils.radToDeg(Math.atan(dist / back));
+    c.aspect = innerWidth / innerHeight;
+  }
+  c.updateProjectionMatrix();
+  // Snapped to whole shadow texels. Sliding the frustum by fractions of a texel
+  // makes every shadow edge crawl as you walk, which reads as the shadows being
+  // redrawn rather than as the light staying still.
+  const q = SHADOW_TEXEL;
+  const snap = new THREE.Vector3(
+    Math.round(target.x / q) * q, Math.round(target.y / q) * q, Math.round(target.z / q) * q);
+  if (!snap.equals(key.target.position)) renderer.shadowMap.needsUpdate = true;
+  key.target.position.copy(snap);
+  key.position.copy(snap).add(
+    new THREE.Vector3(
+      Math.sin(THREE.MathUtils.degToRad(LIGHTS[lightIdx].ang[0])) * Math.cos(THREE.MathUtils.degToRad(LIGHTS[lightIdx].ang[1])) * 40,
+      Math.sin(THREE.MathUtils.degToRad(LIGHTS[lightIdx].ang[1])) * 40,
+      Math.cos(THREE.MathUtils.degToRad(LIGHTS[lightIdx].ang[0])) * Math.cos(THREE.MathUtils.degToRad(LIGHTS[lightIdx].ang[1])) * 40
+    ));
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  aim();
+}
+addEventListener('resize', resize);
+
+// -------------------------------------------------------------------- loop --
+const pos = new THREE.Vector3(0, 0, 4);
+// NO JUMP CLIP EXISTS. Not in this 13-clip glb and not in the 24-clip source
+// either — the nearest thing the pack ships is Roll, which is a dodge. So the
+// arc is physics and the body holds whatever pose it left the ground in, which
+// reads better than a walk cycle looping in mid-air. A hand-keyed pose is the
+// real fix, the same gap the plan records for archery.
+const GRAVITY = -24, JUMP_V = 7.6;
+let jumpV = 0, airborne = false;
+const vel = new THREE.Vector3();
+let speed = 0;
+const hud = document.getElementById('hud');
+let last = performance.now();
+let frameNo = 0;
+let fpsAcc = 0, fpsN = 0, fps = 0;
+
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  frameNo++;
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc >= 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }
+
+  // Move relative to the camera, which is what makes an isometric view usable:
+  // W is always away from the viewer, whatever the world thinks north is.
+  const f = new THREE.Vector3(-Math.sin(azi), 0, -Math.cos(azi));
+  const r = new THREE.Vector3(Math.cos(azi), 0, -Math.sin(azi));
+  vel.set(0, 0, 0);
+  if (held.has('w')) vel.add(f);
+  if (held.has('s')) vel.sub(f);
+  if (held.has('d')) vel.add(r);
+  if (held.has('a')) vel.sub(r);
+
+  const running = held.has('shift');
+  const gait = running ? 'Run' : 'Walk';
+  const pace = running ? runPace : walkPace;
+  const want = REFS[gait] * pace;
+  if (vel.lengthSq() > 0 && !locked) {
+    vel.normalize().multiplyScalar(want);
+    // Slide along a face rather than stopping dead against it: try the whole
+    // step, then each axis on its own. Airborne, nothing is refused — a cliff
+    // you can jump onto is the reason the jump is there.
+    const h0 = heightAt(pos.x, pos.z);
+    const passable = (ux, uz) => {
+      if (airborne) return true;
+      const L = Math.hypot(ux, uz);
+      if (L < 1e-6) return false;
+      const dh = heightAt(pos.x + ux / L * LOOKAHEAD, pos.z + uz / L * LOOKAHEAD) - h0;
+      // Downhill and level are never refused, which is what guarantees there is
+      // always a way back out of wherever he has walked into.
+      return dh <= STEP_UP || dh / LOOKAHEAD <= MAX_CLIMB;
+    };
+    const dx = vel.x * dt, dz = vel.z * dt;
+    if (passable(dx, dz)) { pos.x += dx; pos.z += dz; }
+    else if (passable(dx, 0)) { pos.x += dx; }
+    else if (passable(0, dz)) { pos.z += dz; }
+    // THE MODEL FACES +Z, so its forward goes to (sin t, 0, cos t) and the yaw
+    // is atan2(x, z). Assuming -Z mirrors every angle, which is the mistake the
+    // plan records having already made once.
+    if (root) {
+      const yaw = Math.atan2(vel.x, vel.z);
+      let d = yaw - root.rotation.y;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      root.rotation.y += d * Math.min(1, dt * 14);
+    }
+    speed = want;
+  } else {
+    speed = 0;
+  }
+
+  // The ground is the authority on where the feet are; the jump is the only
+  // thing allowed to leave it.
+  const gh = heightAt(pos.x, pos.z);
+  if (airborne) {
+    jumpV += GRAVITY * dt;
+    pos.y += jumpV * dt;
+    if (pos.y <= gh) { pos.y = gh; jumpV = 0; airborne = false; }
+  } else {
+    pos.y = gh;
+  }
+
+  if (root) {
+    // Moving, the body's shadow has to keep up frame by frame. Standing still it
+    // is only the idle animation breathing, so every fifth frame is enough and
+    // the terrain stops being redrawn into the depth map for nothing.
+    if (speed > 0 || airborne || locked || (frameNo % 5) === 0) renderer.shadowMap.needsUpdate = true;
+    root.position.copy(pos);
+    // NO CLIMB CLIP EXISTS in either the 13-clip glb or the 24-clip source — the
+    // pack ships Roll and nothing else off the flat. Pitching the body into the
+    // gradient is not an animation, but it is the difference between walking up
+    // a hill and sliding up one.
+    const ahead = 0.6;
+    const fx = Math.sin(root.rotation.y), fz = Math.cos(root.rotation.y);
+    const grade = airborne ? 0
+      : (heightAt(pos.x + fx * ahead, pos.z + fz * ahead) - gh) / ahead;
+    const lean = Math.max(-0.28, Math.min(0.28, Math.atan(grade) * 0.55));
+    root.rotation.order = 'YXZ';
+    root.rotation.x += (-lean - root.rotation.x) * Math.min(1, dt * 6);
+  }
+
+  let clipName = '—', rate = 1;
+  if (mixer) {
+    if (!locked) {
+      if (speed > 0.01) play(running ? 'Run' : 'Walk');
+      else play(stance === 'sword' ? 'Idle_Sword' : stance === 'gun' ? 'Idle_Gun' : 'Idle');
+    }
+    if (current) {
+      const nm = current.getClip().name;
+      // Same ratio as before, but now it can only ever come back to the pace
+      // that produced the speed, so the feet cannot drift.
+      const ref = REFS[nm] || null;
+      rate = ref && speed > 0 ? Math.min(RATE_MAX, Math.max(RATE_MIN, speed / ref)) : 1;
+      if (airborne && !locked) rate = 0;
+      current.setEffectiveTimeScale(rate);
+      clipName = nm;
+    }
+    mixer.update(dt);
+  }
+
+  target.lerp(new THREE.Vector3(pos.x, pos.y + 1.0, pos.z), Math.min(1, dt * 7));
+  aim();
+  renderer.render(scene, cam());
+
+  hud.textContent =
+    'clip     ' + clipName + '  x' + rate.toFixed(2) + '\n' +
+    'speed    ' + speed.toFixed(2) + ' m/s   stance ' + stance + (heldGroup ? ' (held)' : '') + '\n' +
+    'pace     walk x' + walkPace.toFixed(2) + ' = ' + (REFS.Walk * walkPace).toFixed(2) + '   run x' + runPace.toFixed(2) + ' = ' + (REFS.Run * runPace).toFixed(2) + '\n' +
+    'camera   ' + (ortho ? 'ortho ' + ISO_ELEV_DEG + '°' : 'persp') +
+      '  azi ' + Math.round(THREE.MathUtils.radToDeg(azi)) % 360 + '°  half-h ' + dist.toFixed(1) + '\n' +
+    'light    ' + LIGHTS[lightIdx].name + '   shading ' + SHADING[shading] + '\n' +
+    'fps      ' + fps + '   tris ' + (renderer.info.render.triangles / 1000 | 0) + 'k   calls ' + renderer.info.render.calls + '\n' +
+    'model    ' + rawH.toFixed(2) + ' raw -> ' + modelH.toFixed(2) + ' m   props ' + propsLoaded + '/' + CAMP.length;
+
+  requestAnimationFrame(frame);
+}
+
+// MEASURE THE CLIP INSTEAD OF GUESSING AT IT.
+//
+// A locomotion clip has one ground speed at which its feet stay planted: the
+// distance a foot travels backwards through a stride, divided by the time it
+// takes. Below that the feet skid forwards, above it they skid back. The plan
+// carries 2.6 for Walk marked as a guess, and this is how to stop guessing.
+//
+// The forward axis is +Z, the same fact the yaw depends on. Foot positions are
+// read in the root's own frame so the figure's heading does not enter into it.
+function measureRef(clipName, samples = 240) {
+  const clip = clips.get(clipName);
+  if (!clip || !root) return null;
+  const feet = [];
+  root.traverse(o => {
+    if (o.isBone && /^(foot|toes)[lr]$/i.test(o.name.replace(/[^a-z]/gi, ''))) feet.push(o);
+  });
+  if (!feet.length) return null;
+
+  const keep = current;                       // put playback back afterwards
+  const probe = mixer.clipAction(clip);
+  mixer.stopAllAction();
+  probe.reset().play();
+
+  const v = new THREE.Vector3();
+  const traces = feet.map(() => []);
+  for (let i = 0; i < samples; i++) {
+    mixer.setTime((i / samples) * clip.duration);
+    root.updateMatrixWorld(true);
+    feet.forEach((b, k) => {
+      v.setFromMatrixPosition(b.matrixWorld);
+      traces[k].push(root.worldToLocal(v.clone()).z);
+    });
+  }
+
+  probe.stop();
+  mixer.stopAllAction();
+  current = null;
+  if (keep) { const c = mixer.clipAction(keep.getClip()); c.reset().play(); current = c; }
+
+  // One cycle carries a step per foot, so the body covers two stride lengths.
+  const strides = traces.map(t => Math.max(...t) - Math.min(...t));
+  const stride = strides.reduce((a, b) => a + b, 0) / strides.length;
+  return {
+    clip: clipName,
+    duration: +clip.duration.toFixed(3),
+    feet: feet.map(b => b.name),
+    strideEach: strides.map(x => +x.toFixed(3)),
+    // In the root's OWN units. The caller multiplies by root.scale to get metres.
+    refSpeed: +((stride * feet.length) / clip.duration).toFixed(2),
+  };
+}
+
+window.__dbg = { THREE, scene, key, hemi, rim, renderer, ground, pos, LIGHTS, measureRef, TRACKS, heightAt,
+                 get root(){ return root; }, get mixer(){ return mixer; }, get clips(){ return clips; } };
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+.DS_Store
+._*
+
+# The source art stays out of git for now: 547 MB of .blend and .fbx that the
+# game never loads. Only the OBJ folders the previews actually read are tracked,
+# together with each pack's licence.
+sprites/*
+!sprites/Survival Pack - Sept 2020/
+!sprites/Ultimate Gun Pack - July 2019/
+!sprites/Ultimate Modular Men- Feb 2022/
+!sprites/Ultimate Modular Women - April 2022/
+
+sprites/Survival Pack - Sept 2020/*
+!sprites/Survival Pack - Sept 2020/OBJ/
+!sprites/Survival Pack - Sept 2020/License.txt
+
+sprites/Ultimate Gun Pack - July 2019/*
+!sprites/Ultimate Gun Pack - July 2019/OBJ/
+!sprites/Ultimate Gun Pack - July 2019/License.txt
+
+# The two modular CHARACTER packs stay out entirely. Their glTF is base64 and
+# runs to ~140 MB for twenty-one outfits, none of which the game loads — it uses
+# models/adventurer-m.glb, converted from one of them. tools/character-preview.html
+# needs them present locally and will not run from the published site.
+sprites/Ultimate Modular Men- Feb 2022/*
+!sprites/Ultimate Modular Men- Feb 2022/License.txt
+sprites/Ultimate Modular Women - April 2022/*
+!sprites/Ultimate Modular Women - April 2022/License.txt
+
+# Local preview config, carries absolute paths from this machine.
+.claude/
