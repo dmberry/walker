@@ -1348,6 +1348,7 @@ function lightTheFire(group, x, z) {
 // down the flank, stacks, a perimeter fence, and beacons that only mean anything
 // after dark.
 const beacons = [];
+const signs = [];
 
 // Concrete and hazard panel, both David M. Berry's own CC0 work out of NostOS.
 // A box has one set of UVs across every face, so the repeat has to be set per
@@ -1454,6 +1455,63 @@ function buildDatacentre() {
     const half = (fw - GATE) / 2;
     put(box(half * 2, 0.10, 0.10, 0x3d4145, 0), sgn * (GATE + half), APRON_H + 2.4, fd, false);
   }
+
+  // THE SIGN. Drawn to a canvas rather than modelled as letters: a texture on a
+  // plate is a few hundred bytes of code where geometry would be a font
+  // pipeline, and at this distance it is the same picture. Kept on the two
+  // faces the isometric camera can see, which are south and east.
+  const signTex = (text, w, h) => {
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#20262c';
+    c.fillRect(0, 0, w, h);
+    // A hairline surround, the way a fixed panel has an edge.
+    c.strokeStyle = 'rgba(255,255,255,0.13)';
+    c.lineWidth = Math.max(2, h * 0.018);
+    c.strokeRect(c.lineWidth, c.lineWidth, w - c.lineWidth * 2, h - c.lineWidth * 2);
+    c.fillStyle = '#e8eef2';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = '600 ' + Math.round(h * 0.40) + 'px ui-sans-serif, Helvetica, Arial, sans-serif';
+    // Letter-spaced by hand, because corporate signage always is and because
+    // canvas letterSpacing is not everywhere yet.
+    const sp = h * 0.055;
+    const chars = [...text];
+    const width = chars.reduce((a, ch) => a + c.measureText(ch).width + sp, -sp);
+    let x = w / 2 - width / 2;
+    for (const ch of chars) {
+      const cw = c.measureText(ch).width;
+      c.fillText(ch, x + cw / 2, h * 0.52);
+      x += cw + sp;
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  };
+
+  const signMat = (text, px, py) => new THREE.MeshLambertMaterial({
+    map: signTex(text, px, py),
+    // Lit signage: enough at night to read, nothing in daylight.
+    emissive: new THREE.Color(0x9fb4c4), emissiveIntensity: 0,
+  });
+
+  const NAME = 'NEOCLOUD DATA SOLUTIONS';
+  const southMat = signMat(NAME, 2048, 260);
+  const south = new THREE.Mesh(new THREE.PlaneGeometry(62, 7.9), southMat);
+  south.position.set(0, 1.6 + H * 0.62, D / 2 + 0.35);
+  south.receiveShadow = true;
+  g.add(south);
+
+  const eastMat = signMat(NAME, 1536, 260);
+  const east = new THREE.Mesh(new THREE.PlaneGeometry(31, 5.2), eastMat);
+  east.rotation.y = Math.PI / 2;
+  east.position.set(W / 2 + 0.35, 1.6 + H * 0.62, 0);
+  east.receiveShadow = true;
+  g.add(east);
+
+  signs.push(southMat, eastMat);
 
   // Beacons. Emissive here is right, unlike on the path stones: these ARE
   // lights, and they should be the only thing of the building visible at night.
@@ -2097,6 +2155,13 @@ function frame(now) {
     }
   } else {
     stepPhase = 0;
+  }
+
+  if (signs.length) {
+    // Comes up as the daylight goes, and holds steady — it is a lit sign, not a
+    // beacon, so it does not pulse.
+    const lit = Math.pow(1 - daylight, 1.4) * 0.85;
+    for (const m of signs) m.emissiveIntensity = lit;
   }
 
   if (beacons.length) {
