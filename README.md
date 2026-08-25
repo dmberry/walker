@@ -25,6 +25,7 @@ docs/character-3d-plan.md   the design, the findings, and every coordinate
 patches/                    the NostOS integration, as a diff against v1.8
 src/character3d.js          the renderer: poses a skeleton, draws it flat
 tools/character-preview.html    the instrument all the numbers came out of
+tools/import-nature.py          copies the used nature models out of _tmp/
 tools/world-preview.html        the character in a 3D world of its own
 tools/gltf2glb.mjs          .gltf -> .glb, dropping clips you do not want
 tools/sync-item-map.py      copies the item table into the plan doc
@@ -206,7 +207,24 @@ python3 -m http.server 8000
 `tools/character-preview.html` is the exception. It reads the two modular
 character packs as glTF, and those are not in the repository — twenty-one
 outfits of base64 glTF runs to about 140 MB and the game loads none of it, using
-`models/adventurer-m.glb` instead. Drop the packs into `sprites/` to run it.
+`models/adventurer-m.glb` instead. Put the packs in `_tmp/sprites/` to run it.
+
+## Where the art lives
+
+Source packs go in the gitignored `_tmp/` and **only what is loaded is copied
+into `assets/`**. The four Quaternius kits together are about 670 MB on disk;
+the game reads roughly six of it.
+
+```
+assets/props/    the 15 Survival Pack props the camp and the hands use, plus Pistol_1
+assets/nature/   19 of the Stylized Nature MegaKit's 68 models, textures at 512
+models/          adventurer-m.glb
+_tmp/            every pack in full. Nothing here ships.
+```
+
+`tools/import-nature.py` is the record of which nature models were taken and at
+what texture size, so the import can be repeated rather than remembered.
+Everything is CC0 from Quaternius; each folder carries its licence.
 
 ## Licences
 

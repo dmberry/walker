@@ -11,7 +11,7 @@ original: edit the previewer, run this, never hand-edit the fence in the doc.
 import re, sys, pathlib
 
 root = pathlib.Path(__file__).resolve().parent.parent
-src = (root / '_tmp/character-preview.html').read_text()
+src = (root / 'tools/character-preview.html').read_text()
 doc_path = root / 'docs/character-3d-plan.md'
 doc = doc_path.read_text()
 

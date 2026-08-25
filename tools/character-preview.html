@@ -492,7 +492,7 @@ function fresh() {
            stretch: {}, hiddenParts: [], anchor: 'centre' };
 }
 
-const url = (pk, o) => encodeURI(`../sprites/${PACKS[pk].dir}/Individual Characters/glTF/${o}.gltf`);
+const url = (pk, o) => encodeURI(`../_tmp/sprites/${PACKS[pk].dir}/Individual Characters/glTF/${o}.gltf`);
 const load1 = async (pk, o) => {
   const k = pk + '/' + o;
   if (cache.has(k)) return cache.get(k);
@@ -618,7 +618,7 @@ let propParts = new Map();   // material name -> its own Mesh, once split
 function loadProp(dir, name) {
   const k = dir + name;
   if (propCache.has(k)) return Promise.resolve(propCache.get(k));
-  const base = '../sprites/' + dir;
+  const base = '../_tmp/sprites/' + dir;
   return new Promise((res, rej) => {
     new MTLLoader().setPath(encodeURI(base)).load(name + '.mtl', mtl => {
       mtl.preload();

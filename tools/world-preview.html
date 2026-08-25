@@ -600,8 +600,11 @@ function parseOBJ(text, mats) {
   return out;
 }
 
-const SURV = '../sprites/Survival Pack - Sept 2020/OBJ/';
-const GUNS = '../sprites/Ultimate Gun Pack - July 2019/OBJ/';
+// Only the fifteen props the game loads live in the repo; the full packs stay
+// in the gitignored _tmp/. tools/import-nature.py records the same for the
+// nature kit.
+const SURV = '../assets/props/';
+const GUNS = '../assets/props/';
 const PROP_DIR = SURV;
 async function loadProp(name, dir = PROP_DIR) {
   const [m, o] = await Promise.all([
@@ -629,102 +632,111 @@ function place(obj, x, z, height, yaw = 0) {
 // Trees and rocks are made here rather than sourced, so the scene stands up
 // with nothing but what the repo already holds. Flat-shaded cones on a trunk is
 // the same register the Quaternius packs are drawn in.
-// Height comes in from the caller, because the scatter has to know a tree's
-// canopy radius BEFORE it decides whether the tree fits.
-function tree(x, z, h) {
-  const g = new THREE.Group();
-  const trunkH = h * 0.34;
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(h * 0.035, h * 0.055, trunkH, 6),
-    new THREE.MeshLambertMaterial({ color: 0x6b4b2f, flatShading: true }));
-  trunk.position.y = trunkH / 2;
-  g.add(trunk);
-  // DARKER AND BLUER THAN THE GROUND ON PURPOSE. At the first pass the canopy
-  // sat inside the ground's own range, so on a shaded slope a whole tree
-  // disappeared and left its trunk standing on its own — it read as a field of
-  // bare poles, and the trees turned out to be perfectly intact.
-  const green = new THREE.Color().setHSL(0.30 + rand() * 0.05, 0.46, 0.17 + rand() * 0.07);
-  for (let i = 0; i < 3; i++) {
-    const r = h * (0.30 - i * 0.07);
-    const c = new THREE.Mesh(
-      new THREE.ConeGeometry(r, h * 0.34, 7),
-      new THREE.MeshLambertMaterial({ color: green, flatShading: true }));
-    c.position.y = trunkH + h * 0.16 + i * h * 0.20;
-    g.add(c);
-  }
-  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  g.position.set(x, heightAt(x, z), z);
-  g.rotation.y = rand() * Math.PI * 2;
-  scene.add(g);
-  return g;
+// SCENERY COMES OUT OF THE KIT NOW. The cones-on-a-cylinder stood in while the
+// world was being built and read as what they were. These are Quaternius's
+// Stylized Nature models, the same hand as the figure and the props, so the
+// register holds — but they are textured where everything else here is flat
+// material, and that is the one thing to judge by eye rather than by argument.
+//
+// Only nineteen of the kit's sixty-eight are in the repo. Pines are the cheap
+// ones at about 4k triangles; broadleaf runs to 6k, so the mix leans conifer.
+const TREE_MODELS = ['Pine_1', 'Pine_2', 'Pine_3', 'Pine_4', 'Pine_5',
+                     'Pine_1', 'Pine_3', 'Pine_5',
+                     'CommonTree_1', 'CommonTree_2', 'CommonTree_3',
+                     'DeadTree_1', 'DeadTree_2'];
+const ROCK_MODELS = ['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3',
+                     'Pebble_Round_1', 'Pebble_Round_2', 'Pebble_Square_1'];
+const UNDER_MODELS = ['Bush_Common', 'Fern_1', 'Grass_Common_Tall'];
+
+const natureCache = new Map();
+function loadNature(name) {
+  if (natureCache.has(name)) return natureCache.get(name);
+  const pr = new Promise((res, rej) => {
+    new GLTFLoader().load('../assets/nature/' + name + '.gltf', (g) => {
+      g.scene.traverse(o => {
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        o.receiveShadow = true;
+        // Leaf cards are cut out of their texture, so the depth pass has to
+        // honour the cut or the shadows arrive as solid rectangles.
+        o.material.alphaTest = 0.5;
+        o.material.transparent = false;
+        o.material.side = THREE.DoubleSide;
+      });
+      res(g.scene);
+    }, undefined, rej);
+  });
+  natureCache.set(name, pr);
+  return pr;
 }
 
-function rock(x, z) {
-  const r = 0.28 + rand() * 0.7;
-  const m = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(r, 0),
-    new THREE.MeshLambertMaterial({ color: 0x8a8b84, flatShading: true }));
-  m.position.set(x, heightAt(x, z) + r * 0.55, z);
-  m.rotation.set(rand() * 3, rand() * 3, rand() * 3);
-  m.scale.y = 0.7;
-  m.castShadow = true; m.receiveShadow = true;
-  scene.add(m);
-  return m;
+// Dropped so its lowest point sits on the ground and scaled to a height in
+// metres, the same treatment the camp props get.
+function plant(src, x, z, height, yaw) {
+  const obj = src.clone(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const s = height / (size.y || 1);
+  obj.scale.setScalar(s);
+  obj.position.set(x, heightAt(x, z) - box.min.y * s, z);
+  obj.rotation.y = yaw;
+  scene.add(obj);
+  return obj;
 }
 
-// Tufts. Small, dense and close to the ground, they are what actually sells
-// speed at running pace — the texture reads at a distance, these read underfoot.
-const tuftGeo = new THREE.ConeGeometry(0.055, 0.17, 4);
-const tuftMat = new THREE.MeshLambertMaterial({ color: 0x5f7f3e, flatShading: true });
-const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, 1600);
-tufts.castShadow = false;
-tufts.receiveShadow = true;
-{
-  const m = new THREE.Object3D();
-  for (let i = 0; i < tufts.count; i++) {
-    const a = rand() * Math.PI * 2, d = rand() * 58;
-    const tx = Math.cos(a) * d, tz = Math.sin(a) * d;
-    if (onTrack(tx, tz, 0.25)) { m.scale.setScalar(0); m.updateMatrix(); tufts.setMatrixAt(i, m.matrix); continue; }
-    m.position.set(tx, heightAt(tx, tz) + 0.075, tz);
-    m.rotation.set(0, rand() * 6.28, (rand() - 0.5) * 0.5);
-    m.scale.setScalar(0.6 + rand() * 0.8);
-    m.updateMatrix();
-    tufts.setMatrixAt(i, m.matrix);
-  }
-  tufts.instanceMatrix.needsUpdate = true;
-}
-scene.add(tufts);
-
-const scenery = [];
-
-// TREES NEED ROOM. Scattered at random the canopies overlap, and two trees that
-// interpenetrate stop reading as two trees — they merge into one lump with two
-// trunks under it. Rejection sampling against the canopies already placed keeps
-// them apart, at a spacing that scales with how big each one is rather than
-// being one fixed number.
-// 5.4-9.3 m tall, so the base cone is 1.6-2.8 m across.
 const canopies = [];
-for (let tries = 0; tries < 6000 && canopies.length < 52; tries++) {
-  const a = rand() * Math.PI * 2, d = 9 + rand() * 46;
-  const x = Math.cos(a) * d, z = Math.sin(a) * d;
-  if (onTrack(x, z, 1.8)) continue;
-  const h = 5.4 + rand() * 3.9;
-  const r = h * 0.30;
-  let clear = true;
-  for (const c of canopies) {
-    if ((x - c.x) ** 2 + (z - c.z) ** 2 < ((r + c.r) * 0.92) ** 2) { clear = false; break; }
+let sceneryCount = 0;
+
+Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS])].map(
+  n => loadNature(n).then(o => [n, o]).catch(() => { fail('nature missing: ' + n); return null; })
+)).then(loaded => {
+  const lib = new Map(loaded.filter(Boolean));
+
+  // TREES NEED ROOM. Scattered at random the canopies overlap, and two trees
+  // that interpenetrate stop reading as two trees — they become one lump with
+  // two trunks under it. Rejection sampling against what is already down keeps
+  // them apart at a spacing that scales with how big each one is.
+  for (let tries = 0; tries < 6000 && canopies.length < 34; tries++) {
+    const a = rand() * Math.PI * 2, d = 10 + rand() * 46;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    if (onTrack(x, z, 2.0)) continue;
+    const h = 5.6 + rand() * 4.2;
+    const r = h * 0.24;
+    let clear = true;
+    for (const c of canopies) {
+      if ((x - c.x) ** 2 + (z - c.z) ** 2 < ((r + c.r) * 0.95) ** 2) { clear = false; break; }
+    }
+    if (!clear) continue;
+    const src = lib.get(TREE_MODELS[(rand() * TREE_MODELS.length) | 0]);
+    if (!src) continue;
+    canopies.push({ x, z, r });
+    plant(src, x, z, h, rand() * Math.PI * 2);
+    sceneryCount++;
   }
-  if (!clear) continue;
-  canopies.push({ x, z, r });
-  scenery.push(tree(x, z, h));
-}
-for (let i = 0; i < 40; i++) {
-  const a = rand() * Math.PI * 2, d = 5 + rand() * 46;
-  const x = Math.cos(a) * d, z = Math.sin(a) * d;
-  if (onTrack(x, z, 0.9)) continue;
-  if (canopies.some(c => (x - c.x) ** 2 + (z - c.z) ** 2 < (c.r * 0.55) ** 2)) continue;
-  scenery.push(rock(x, z));
-}
+
+  for (let i = 0; i < 46; i++) {
+    const a = rand() * Math.PI * 2, d = 5 + rand() * 48;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    if (onTrack(x, z, 0.9)) continue;
+    if (canopies.some(c => (x - c.x) ** 2 + (z - c.z) ** 2 < (c.r * 0.5) ** 2)) continue;
+    const src = lib.get(ROCK_MODELS[(rand() * ROCK_MODELS.length) | 0]);
+    if (!src) continue;
+    plant(src, x, z, 0.28 + rand() * 0.85, rand() * Math.PI * 2);
+    sceneryCount++;
+  }
+
+  // Undergrowth, close in where it will be seen.
+  for (let i = 0; i < 90; i++) {
+    const a = rand() * Math.PI * 2, d = 6 + rand() * 34;
+    const x = Math.cos(a) * d, z = Math.sin(a) * d;
+    if (onTrack(x, z, 0.7)) continue;
+    const src = lib.get(UNDER_MODELS[(rand() * UNDER_MODELS.length) | 0]);
+    if (!src) continue;
+    plant(src, x, z, 0.35 + rand() * 0.55, rand() * Math.PI * 2);
+    sceneryCount++;
+  }
+});
 
 // A camp, so there is somewhere for the figure to be rather than an empty
 // field. Heights are in metres and are what the props are being asked to be,
