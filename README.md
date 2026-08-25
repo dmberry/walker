@@ -57,7 +57,8 @@ isometric lattice,
 `M` and `8` `9` for the wind, `,` `.` to trim the walk pace (`SHIFT` with them
 for run) and `;` `'` for the size of the held weapon.
 
-A day runs in seven minutes. Everything about the light is a function of one
+A day runs in twenty minutes by default; `T` steps through 20, 45 and 7 and
+then holds the clock. Everything about the light is a function of one
 number — the fraction of the day elapsed — so the sun climbs a tilted arc and
 rises east and sets west, its colour goes from orange at the horizon to warm
 white overhead, and the sky, the fog, the fill and the moon all read off the
