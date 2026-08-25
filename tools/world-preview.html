@@ -154,7 +154,8 @@
 CLICK strike   SPACE jump
 E interact   V wave   H take a hit   X die
 SHIFT costs stamina; health returns once nothing has hit you
-L shading   K skip 3h   T clock speed / hold   G grid   M mute wind   8 9 wind level   I about
+L shading   K skip 3h   T clock speed / hold   G grid   R reset
+M mute wind   8 9 wind level   I about
 , . walk pace   SHIFT , . run pace</div>
 <div id="err" hidden></div>
 
@@ -364,6 +365,11 @@ const scatter = makeRand(19940417);     // where things stand
 // heightAt() is the single authority. The plane's vertices, every tree, rock,
 // tuft and prop, the figure's feet and the jump's landing all read it, so
 // nothing can disagree with the ground about where the ground is.
+// THE DATACENTRE. North is -Z. It sits a hundred metres off, which is far
+// enough that you come upon it rather than start beside it, and big enough that
+// it is on the skyline from the camp.
+const DC = { x: 0, z: -82, w: 92, d: 46, h: 15 };
+
 const TERRAIN_AMP = 7.5;
 const TERRAIN_SCALE = 46;
 
@@ -438,11 +444,30 @@ function heightAt(x, z) {
   // the middle and let the country come up again outside it.
   const d = Math.hypot(x, z);
   const t = Math.min(1, Math.max(0, (d - 9) / 14));
-  return h * fade(t);
+  h *= fade(t);
+
+  // And the datacentre stands on ground that was levelled for it — a rectangular
+  // pad with a graded margin, which is what earthworks look like from the air.
+  const px = Math.abs(x - DC.x) - DC.w / 2 - 15;
+  const pz = Math.abs(z - DC.z) - DC.d / 2 - 15;
+  const pad = Math.min(1, Math.max(0, Math.max(px, pz) / 26));
+  return h * fade(pad);
 }
 
 // The steepest thing the figure will walk up. Past this a face is a wall, which
 // is what makes a cliff a cliff rather than a ramp — SPACE is the way over.
+// THE APRON IS A FLOOR, and the feet have to know it. The slab stands 0.35 m
+// proud of the levelled ground; heightAt() answers for the terrain and knows
+// nothing about it, so walking onto the yard put him a slab's thickness under
+// its surface. groundY() is what the body stands on — terrain everywhere else,
+// terrain plus the slab inside the fence. The step up onto it is well under
+// STEP_UP, so he walks on without a jump.
+const APRON_H = 0.35;
+function onApron(x, z) {
+  return Math.abs(x - DC.x) < DC.w / 2 + 13 && Math.abs(z - DC.z) < DC.d / 2 + 13;
+}
+function groundY(x, z) { return heightAt(x, z) + (onApron(x, z) ? APRON_H : 0); }
+
 const MAX_CLIMB = Math.tan(THREE.MathUtils.degToRad(46));
 // Test the slope over a FIXED distance, not over one frame's travel. Measured
 // across the 8 cm a frame covers, a terrace face reads as a near-infinite
@@ -463,13 +488,21 @@ const PLAYER_R = 0.34;
 // jump is only ever a hop on the spot; with one, a log and a gas can are things
 // to clear and a tree is not. The apex is v^2/2g = 7.6^2/48, about 1.2 m, so
 // that is the line between the two by construction rather than by a list.
+// Two shapes. A circle suits a trunk or a boulder; it suits a ninety-metre hall
+// very badly — a chain of circles along a wall either leaves gaps between them
+// or stops him a radius short of the whole building. Anything rectilinear gets
+// a rectangle.
 const blockers = [];
 function blocked(x, z, feetY) {
   for (let i = 0; i < blockers.length; i++) {
     const b = blockers[i];
     if (feetY !== undefined && feetY >= b.top) continue;   // over the top of it
-    const rr = b.r + PLAYER_R;
-    if ((x - b.x) ** 2 + (z - b.z) ** 2 < rr * rr) return true;
+    if (b.hw !== undefined) {
+      if (Math.abs(x - b.x) < b.hw + PLAYER_R && Math.abs(z - b.z) < b.hd + PLAYER_R) return true;
+    } else {
+      const rr = b.r + PLAYER_R;
+      if ((x - b.x) ** 2 + (z - b.z) ** 2 < rr * rr) return true;
+    }
   }
   return false;
 }
@@ -479,8 +512,17 @@ function blocked(x, z, feetY) {
 // to its edge rather than left there.
 function shoveClear() {
   for (const b of blockers) {
-    const rr = b.r + PLAYER_R;
     const dx = pos.x - b.x, dz = pos.z - b.z;
+    if (b.hw !== undefined) {
+      const ox = b.hw + PLAYER_R - Math.abs(dx);
+      const oz = b.hd + PLAYER_R - Math.abs(dz);
+      if (ox <= 0 || oz <= 0) continue;
+      // Out by the shorter overlap, which is the nearest way to a face.
+      if (ox < oz) pos.x = b.x + Math.sign(dx || 1) * (b.hw + PLAYER_R) * 1.02;
+      else pos.z = b.z + Math.sign(dz || 1) * (b.hd + PLAYER_R) * 1.02;
+      continue;
+    }
+    const rr = b.r + PLAYER_R;
     const d2 = dx * dx + dz * dz;
     if (d2 >= rr * rr) continue;
     const d = Math.sqrt(d2) || 1e-4;
@@ -544,10 +586,16 @@ function trailFrom(angle, length) {
   return pts;
 }
 
-const TRACKS = [trailFrom(0.4, 78), trailFrom(2.5, 70), trailFrom(4.2, 82), trailFrom(5.6, 58)];
+// The third bearing is aimed at the datacentre, because a path goes somewhere.
+const TRACKS = [trailFrom(0.4, 78), trailFrom(2.5, 70),
+                trailFrom(Math.atan2(DC.z, DC.x), 80), trailFrom(5.6, 58)];
 const trackPts = TRACKS.flat();
 
 // Nothing grows in a path. Used to keep tufts, trees and rocks off them.
+function onYard(x, z) {
+  return Math.abs(x - DC.x) < DC.w / 2 + 18 && Math.abs(z - DC.z) < DC.d / 2 + 18;
+}
+
 function onTrack(x, z, pad) {
   const r = (TRACK_WIDTH / 2 + pad) ** 2;
   for (let i = 0; i < trackPts.length; i++) {
@@ -685,6 +733,35 @@ function groundTexture() {
     g.fillStyle = 'rgba(' + (40 + rand() * 55 | 0) + ',' + (60 + rand() * 55 | 0) + ','
                 + (28 + rand() * 38 | 0) + ',0.12)';
     g.fillRect(rand() * N, rand() * N, 1 + rand() * 3, 1 + rand() * 3);
+  }
+
+  // The yard. Painted before the paths so a track can run up to it, and with a
+  // soft margin because a levelled site does not end at a line either.
+  {
+    const cx = (DC.x + WORLD / 2) * P, cz = (DC.z + WORLD / 2) * P;
+    const hw = (DC.w / 2 + 22) * P, hd = (DC.d / 2 + 22) * P;
+    const yard = g.createRadialGradient(cx, cz, 0, cx, cz, hw);
+    yard.addColorStop(0.0, 'rgba(126,127,120,0.92)');
+    yard.addColorStop(0.62, 'rgba(126,127,120,0.88)');
+    yard.addColorStop(0.86, 'rgba(122,122,112,0.42)');
+    yard.addColorStop(1.0, 'rgba(120,120,110,0)');
+    g.save();
+    g.translate(cx, cz);
+    g.scale(1, hd / hw);
+    g.fillStyle = yard;
+    g.beginPath();
+    g.arc(0, 0, hw, 0, 6.29);
+    g.fill();
+    g.restore();
+    // Stains and patching, so the concrete is not one flat grey.
+    for (let i = 0; i < 900; i++) {
+      const ex = (rand() - 0.5) * hw * 1.7, ez = (rand() - 0.5) * hd * 1.7;
+      const v = 96 + rand() * 54 | 0;
+      g.fillStyle = 'rgba(' + v + ',' + (v + 1) + ',' + (v - 6) + ',' + (0.05 + rand() * 0.13).toFixed(2) + ')';
+      g.beginPath();
+      g.ellipse(cx + ex, cz + ez, (0.5 + rand() * 3.4) * P, (0.4 + rand() * 2.2) * P, rand() * 3.14, 0, 6.29);
+      g.fill();
+    }
   }
 
   // Chalk, the way a Downs path reads: worn through rather than laid down.
@@ -833,6 +910,32 @@ const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: groundTe
 // underfoot. So a second, tiled texture supplies the close detail, multiplied
 // in as brightness only: the canvas keeps saying what colour the ground is
 // there, and the grass only says how rough it is.
+// The yard floor, tiled into the world-space canvas rather than painted flat.
+// The canvas is built synchronously at startup and an image is not, so this
+// repaints that region when the file arrives and tells the texture to re-upload.
+{
+  const img = new Image();
+  img.onload = () => {
+    const cv = groundMat.map.image;
+    const g2 = cv.getContext('2d');
+    const P2 = cv.width / WORLD;
+    const cx = (DC.x + WORLD / 2) * P2, cz = (DC.z + WORLD / 2) * P2;
+    const hw = (DC.w / 2 + 20) * P2, hd = (DC.d / 2 + 20) * P2;
+    g2.save();
+    g2.beginPath();
+    g2.ellipse(cx, cz, hw, hd, 0, 0, 6.29);
+    g2.clip();
+    const tile = 4.5 * P2;                     // metres per repeat
+    g2.globalAlpha = 0.92;
+    for (let x = cx - hw; x < cx + hw; x += tile) {
+      for (let z = cz - hd; z < cz + hd; z += tile) g2.drawImage(img, x, z, tile, tile);
+    }
+    g2.restore();
+    groundMat.map.needsUpdate = true;
+  };
+  img.src = '../assets/site/floor.jpg';
+}
+
 const detailTex = new THREE.TextureLoader().load('../assets/ground/grass.jpg');
 detailTex.wrapS = detailTex.wrapT = THREE.RepeatWrapping;
 detailTex.colorSpace = THREE.SRGBColorSpace;
@@ -1130,7 +1233,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   for (let i = 0; i < 46; i++) {
     const a = scatter() * Math.PI * 2, d = 9 + scatter() * 46;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (onTrack(x, z, 0.9)) continue;
+    if (onTrack(x, z, 0.9) || onYard(x, z)) continue;
     if (canopies.some(c => (x - c.x) ** 2 + (z - c.z) ** 2 < (c.r * 0.5) ** 2)) continue;
     const src = lib.get(ROCK_MODELS[(scatter() * ROCK_MODELS.length) | 0]);
     if (!src) continue;
@@ -1174,7 +1277,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   for (let i = 0; i < 90; i++) {
     const a = scatter() * Math.PI * 2, d = 9 + scatter() * 32;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (onTrack(x, z, 0.7)) continue;
+    if (onTrack(x, z, 0.7) || onYard(x, z)) continue;
     const src = lib.get(UNDER_MODELS[(scatter() * UNDER_MODELS.length) | 0]);
     if (!src) continue;
     plant(src, x, z, 0.35 + scatter() * 0.55, scatter() * Math.PI * 2);
@@ -1238,6 +1341,156 @@ function lightTheFire(group, x, z) {
   return { light, mats, base: 7.5 };
 }
 
+// ------------------------------------------------------------ datacentre ----
+// Built from boxes rather than modelled, because what it needs to be is large,
+// rectilinear and repetitive — and because nothing in a CC0 nature kit is going
+// to supply one. The hall, a plinth it sits on, ranks of roof plant, chillers
+// down the flank, stacks, a perimeter fence, and beacons that only mean anything
+// after dark.
+const beacons = [];
+
+// Concrete and hazard panel, both David M. Berry's own CC0 work out of NostOS.
+// A box has one set of UVs across every face, so the repeat has to be set per
+// mesh from its own size or a wall ninety metres long carries one tile of
+// concrete stretched the whole way.
+const siteTex = (file) => {
+  const t = new THREE.TextureLoader().load('../assets/site/' + file);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+};
+const TEX_CONCRETE = siteTex('concrete.jpg');
+const TEX_HAZARD = siteTex('hazard.jpg');
+
+function buildDatacentre() {
+  const g = new THREE.Group();
+  const clad = (tex, w, h, d, col, tile) => {
+    const t = tex.clone();
+    t.needsUpdate = true;
+    t.repeat.set(Math.max(w, d) / tile, Math.max(h, d) / tile);
+    return new THREE.MeshLambertMaterial({ color: col, map: t });
+  };
+  const box = (w, h, d, col, tile = 4) => new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    tile === 0 ? new THREE.MeshLambertMaterial({ color: col, flatShading: true })
+               : clad(TEX_CONCRETE, w, h, d, col, tile));
+  // A box that stands on the ground and is taller than a step registers its own
+  // footprint. Hand-listing the solid parts is how the chillers and the stacks
+  // came to be walk-through: they were built and then forgotten about.
+  const put = (m, x, y, z, solid = true) => {
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    g.add(m);
+    const p = m.geometry.parameters;
+    const base = y - p.height / 2, top = y + p.height / 2;
+    if (solid && p.height >= STEP_UP && base < STEP_UP + 0.4) {
+      blockers.push({ x: DC.x + x, z: DC.z + z, hw: p.width / 2, hd: p.depth / 2,
+                      top: heightAt(DC.x, DC.z) + top });
+    }
+    return m;
+  };
+
+  const W = DC.w, D = DC.d, H = DC.h;
+
+  // The apron it stands on, a hand's breadth above the levelled ground.
+  put(box(W + 26, 0.35, D + 26, 0x8a8b86), 0, 0.17, 0, false);
+  // Plinth, then the hall.
+  put(box(W + 2.4, 1.4, D + 2.4, 0x63666a), 0, 0.9, 0, false);
+  put(box(W, H, D, 0x9aa0a4), 0, 1.6 + H / 2, 0);
+  // A darker band at the top, which is what stops a big box reading as a box.
+  put(box(W + 0.5, 1.6, D + 0.5, 0x5e6266), 0, 1.6 + H - 0.4, 0);
+  // Louvred flanks: shallow pilasters down the long sides at a fixed rhythm.
+  for (let i = -6; i <= 6; i++) {
+    const x = i * (W / 13.5);
+    put(box(1.5, H - 2.4, 0.7, 0x74797d), x, 1.6 + H / 2, D / 2 + 0.3);
+    put(box(1.5, H - 2.4, 0.7, 0x74797d), x, 1.6 + H / 2, -D / 2 - 0.3);
+  }
+
+  // Roof plant, in ranks. Repetition is the whole visual argument of the thing.
+  for (let r = -1; r <= 1; r++) {
+    for (let i = -7; i <= 7; i++) {
+      const u = put(box(4.2, 2.2, 3.0, 0x9aa0a4, 1.6), i * (W / 15.5), 1.6 + H + 1.1, r * (D / 3.4));
+      put(box(3.4, 0.35, 2.4, 0x3f4347, 0), u.position.x, u.position.y + 1.25, u.position.z);
+    }
+  }
+  // Chillers and transformers down the west flank.
+  for (let i = -3; i <= 3; i++) {
+    put(box(5.0, 4.0, 7.5, 0x8b9094, 2.2), -W / 2 - 6.5, APRON_H + 2.0, i * 9.2);
+  }
+  // Hazard banding at the foot of the plant, and nowhere else. It is the one
+  // loud texture in the kit and a little of it goes a long way.
+  for (let i = -3; i <= 3; i++) {
+    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_HAZARD.clone() });
+    m.map.needsUpdate = true;
+    m.map.repeat.set(3.2, 0.4);
+    const b = new THREE.Mesh(new THREE.BoxGeometry(5.3, 0.55, 7.8), m);
+    put(b, -W / 2 - 6.5, APRON_H + 0.28, i * 9.2, false);
+  }
+
+  // Two stacks.
+  for (const sx of [W / 2 - 8, W / 2 - 16]) {
+    put(box(2.2, H + 9, 2.2, 0x585c60), sx, 1.6 + (H + 9) / 2, -D / 2 + 5);
+  }
+
+  // Perimeter fence. Posts and rails are drawn but not solid — the barrier is
+  // the four rectangles registered below, which is one test instead of sixty and
+  // leaves a gate rather than a post standing in the gateway.
+  const fw = W / 2 + 14, fd = D / 2 + 14;
+  const GATE = 7;                                  // half-width of the way in
+  for (let i = -14; i <= 14; i++) {
+    const x = (i / 14) * fw;
+    if (Math.abs(x) > GATE) put(box(0.22, 2.6, 0.22, 0x3d4145, 0), x, APRON_H + 1.3, fd, false);
+    put(box(0.22, 2.6, 0.22, 0x3d4145, 0), x, APRON_H + 1.3, -fd, false);
+  }
+  for (let i = -7; i <= 7; i++) {
+    const z = (i / 7) * fd;
+    for (const x of [fw, -fw]) put(box(0.22, 2.6, 0.22, 0x3d4145, 0), x, APRON_H + 1.3, z, false);
+  }
+  put(box(fw * 2, 0.10, 0.10, 0x3d4145, 0), 0, APRON_H + 2.4, -fd, false);
+  for (const x of [fw, -fw]) put(box(0.10, 0.10, fd * 2, 0x3d4145, 0), x, APRON_H + 2.4, 0, false);
+  for (const sgn of [-1, 1]) {
+    const half = (fw - GATE) / 2;
+    put(box(half * 2, 0.10, 0.10, 0x3d4145, 0), sgn * (GATE + half), APRON_H + 2.4, fd, false);
+  }
+
+  // Beacons. Emissive here is right, unlike on the path stones: these ARE
+  // lights, and they should be the only thing of the building visible at night.
+  for (const [bx, bz] of [[-W / 2 + 2, -D / 2 + 2], [W / 2 - 2, -D / 2 + 2],
+                          [-W / 2 + 2, D / 2 - 2], [W / 2 - 2, D / 2 - 2]]) {
+    const lamp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55, 10, 8),
+      new THREE.MeshLambertMaterial({ color: 0x8a2a20, emissive: new THREE.Color(0xff3b2a) }));
+    lamp.position.set(bx, 1.6 + H + 2.6, bz);
+    g.add(lamp);
+    beacons.push(lamp.material);
+  }
+
+  g.position.set(DC.x, heightAt(DC.x, DC.z), DC.z);
+  scene.add(g);
+
+  // The hall itself, as one rectangle rather than a chain of circles.
+  blockers.push({ x: DC.x, z: DC.z, hw: W / 2 + 1.2, hd: D / 2 + 1.2,
+                  top: heightAt(DC.x, DC.z) + 1.6 + H });
+
+  // The fence as a barrier: four rectangles, with the south run split either
+  // side of the gate.
+  const rail = (x, z, hw, hd) => blockers.push({ x: DC.x + x, z: DC.z + z, hw, hd,
+                                                 top: heightAt(DC.x, DC.z) + APRON_H + 2.6 });
+  rail(0, -fd, fw, 0.2);
+  rail(-fw, 0, 0.2, fd);
+  rail(fw, 0, 0.2, fd);
+  for (const sgn of [-1, 1]) {
+    const half = (fw - GATE) / 2;
+    rail(sgn * (GATE + half), fd, half, 0.2);
+  }
+
+  return g;
+}
+
+const datacentre = buildDatacentre();
+
 // ------------------------------------------------------------- character ----
 const TARGET_H = 1.75;   // metres; the world is built at this scale
 let root = null, mixer = null, current = null, locked = false, modelH = 0, rawH = 0;
@@ -1272,6 +1525,7 @@ new GLTFLoader().load('../models/adventurer-m.glb', gltf => {
     if (m.contacts && m.contacts.length) CONTACTS[name] = m.contacts;
   }
   play('Idle');
+  if (pendingYaw !== null) { root.rotation.y = pendingYaw; pendingYaw = null; }
   if (pendingHeld) { const k = pendingHeld; pendingHeld = null; setHeld(k); }
 }, undefined, e => fail('model: ' + (e && e.message ? e.message : e)));
 
@@ -1519,6 +1773,7 @@ addEventListener('keydown', e => {
   if (k === 'p') ortho = !ortho;
   if (k === 'g') grid.visible = !grid.visible;
   if (k === 'm') muted = !muted;
+  if (k === 'r') resetToStart();
   if (k === 'i' || k === 'escape') about.classList.toggle('open', k === 'i' ? !about.classList.contains('open') : false);
   if (k === '8') windVol = Math.max(0, +(windVol - 0.15).toFixed(2));
   if (k === '9') windVol = Math.min(3, +(windVol + 0.15).toFixed(2));
@@ -1629,6 +1884,7 @@ addEventListener('resize', resize);
 // -------------------------------------------------------------------- loop --
 const pos = new THREE.Vector3(0, 0, 4);
 let moved = 0;
+let pendingYaw = null;      // a restored heading, applied once the model exists
 // NO JUMP CLIP EXISTS. Not in this 13-clip glb and not in the 24-clip source
 // either — the nearest thing the pack ships is Roll, which is a dodge. So the
 // arc is physics and the body holds whatever pose it left the ground in, which
@@ -1693,14 +1949,14 @@ function frame(now) {
     // Slide along a face rather than stopping dead against it: try the whole
     // step, then each axis on its own. Airborne, nothing is refused — a cliff
     // you can jump onto is the reason the jump is there.
-    const h0 = heightAt(pos.x, pos.z);
+    const h0 = groundY(pos.x, pos.z);
     const passable = (ux, uz) => {
       const L = Math.hypot(ux, uz);
       if (L < 1e-6) return false;
       // Solid whether his feet are down or not — a jump does not clear a trunk.
       if (blocked(pos.x + ux, pos.z + uz, pos.y)) return false;
       if (airborne) return true;
-      const dh = heightAt(pos.x + ux / L * LOOKAHEAD, pos.z + uz / L * LOOKAHEAD) - h0;
+      const dh = groundY(pos.x + ux / L * LOOKAHEAD, pos.z + uz / L * LOOKAHEAD) - h0;
       // Downhill and level are never refused, which is what guarantees there is
       // always a way back out of wherever he has walked into.
       return dh <= STEP_UP || dh / LOOKAHEAD <= MAX_CLIMB;
@@ -1730,7 +1986,7 @@ function frame(now) {
 
   // The ground is the authority on where the feet are; the jump is the only
   // thing allowed to leave it.
-  const gh = heightAt(pos.x, pos.z);
+  const gh = groundY(pos.x, pos.z);
   if (airborne) {
     jumpV += GRAVITY * dt;
     pos.y += jumpV * dt;
@@ -1752,7 +2008,7 @@ function frame(now) {
     const ahead = 0.6;
     const fx = Math.sin(root.rotation.y), fz = Math.cos(root.rotation.y);
     const grade = airborne ? 0
-      : (heightAt(pos.x + fx * ahead, pos.z + fz * ahead) - gh) / ahead;
+      : (groundY(pos.x + fx * ahead, pos.z + fz * ahead) - gh) / ahead;
     const lean = Math.max(-0.28, Math.min(0.28, Math.atan(grade) * 0.55));
     root.rotation.order = 'YXZ';
     root.rotation.x += (-lean - root.rotation.x) * Math.min(1, dt * 6);
@@ -1791,7 +2047,7 @@ function frame(now) {
     if (deadFor > RESPAWN_AFTER) {
       dead = false; locked = false;
       health = 100; stamina = 100;
-      pos.set(0, heightAt(0, 4), 4);
+      pos.set(0, groundY(0, 4), 4);
       jumpV = 0; airborne = false;
       if (root) { root.rotation.x = 0; root.rotation.y = 0; }
       // STOP THE DEATH ACTION, do not just start another one. play() only fades
@@ -1841,6 +2097,13 @@ function frame(now) {
     }
   } else {
     stepPhase = 0;
+  }
+
+  if (beacons.length) {
+    // Off in daylight, and slow — an aviation beacon, not a warning strobe.
+    const pulse = 0.5 + 0.5 * Math.sin(now * 0.0022);
+    const lit = (1 - daylight) * (0.25 + pulse * 0.75);
+    for (const m of beacons) m.emissiveIntensity = lit;
   }
 
   if (fire) {
@@ -1936,6 +2199,64 @@ function measureRef(clipName, samples = 240) {
 
 window.__dbg = { THREE, scene, key, moon, hemi, rim, renderer, ground, pos, measureRef, applyLight, sunAt, get tod(){ return tod; }, set tod(v){ tod = v; applyLight(); }, TRACKS, heightAt, blockers,
                  get root(){ return root; }, get mixer(){ return mixer; }, get clips(){ return clips; } };
+// ------------------------------------------------------------- persistence --
+// Where he was and what time it was, kept across reloads. Only those: the world
+// is generated from fixed seeds, so it comes back identical without being
+// stored. R puts everything back to the start.
+const SAVE_KEY = 'walker.v1';
+
+function saveState() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      x: +pos.x.toFixed(2), z: +pos.z.toFixed(2),
+      yaw: root ? +root.rotation.y.toFixed(3) : 0,
+      tod: +tod.toFixed(5), dayIdx, clockRunning,
+      dist: +dist.toFixed(2), azi: +azi.toFixed(3), ortho,
+    }));
+  } catch (e) { /* private browsing, or a full store. Not worth stopping for. */ }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const st = JSON.parse(raw);
+    if (typeof st.x !== 'number' || typeof st.tod !== 'number') return null;
+    return st;
+  } catch (e) { return null; }
+}
+
+function restore(st) {
+  pos.set(st.x, groundY(st.x, st.z), st.z);
+  tod = st.tod;
+  if (Number.isInteger(st.dayIdx) && st.dayIdx < DAY_LENGTHS.length) dayIdx = st.dayIdx;
+  if (typeof st.clockRunning === 'boolean') clockRunning = st.clockRunning;
+  if (typeof st.dist === 'number') dist = st.dist;
+  if (typeof st.azi === 'number') azi = st.azi;
+  if (typeof st.ortho === 'boolean') ortho = st.ortho;
+  pendingYaw = typeof st.yaw === 'number' ? st.yaw : null;
+  applyLight();
+}
+
+function resetToStart() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  pos.set(0, groundY(0, 4), 4);
+  jumpV = 0; airborne = false;
+  tod = 0.245; dayIdx = 0; clockRunning = true;
+  dist = 11.0; azi = Math.PI / 4; ortho = true;
+  health = 100; stamina = 100; winded = false; dead = false;
+  if (root) { root.rotation.set(0, 0, 0); root.position.copy(pos); }
+  if (mixer) { mixer.stopAllAction(); current = null; locked = false; play('Idle', false, 0); }
+  target.set(pos.x, pos.y + 1.0, pos.z);
+  applyLight();
+  renderer.shadowMap.needsUpdate = true;
+}
+
+const saved = loadState();
+if (saved) restore(saved);
+addEventListener('beforeunload', saveState);
+setInterval(saveState, 4000);
+
 resize();
 requestAnimationFrame(frame);
 </script>

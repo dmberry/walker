@@ -57,6 +57,10 @@ isometric lattice,
 `M` and `8` `9` for the wind, `,` `.` to trim the walk pace (`SHIFT` with them
 for run) and `;` `'` for the size of the held weapon.
 
+A datacentre stands a hundred metres north, on ground levelled for it, with a
+trail running up to its gate. Your position and the time of day survive a
+reload; `R` puts both back to the start.
+
 A day runs in twenty minutes by default; `T` steps through 20, 45 and 7 and
 then holds the clock. Everything about the light is a function of one
 number — the fraction of the day elapsed — so the sun climbs a tilted arc and
@@ -227,6 +231,7 @@ the game reads roughly six of it.
 assets/props/    the 13 Survival Pack props the camp and the hands use, plus Pistol_1
 assets/nature/   29 of the Stylized Nature MegaKit's 68 models, textures at 512
 assets/ground/   grass and dirt, CC0, David M. Berry's own. See SOURCE.txt
+assets/site/     concrete, yard floor and hazard panel, same. See SOURCE.txt
 models/          adventurer-m.glb
 _tmp/            every pack in full. Nothing here ships.
 ```

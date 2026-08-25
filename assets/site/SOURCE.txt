@@ -1,0 +1,9 @@
+concrete.jpg  from nostos assets/textures/floor-road.jpg, resampled to 512
+floor.jpg     from nostos assets/textures/misc-ring-bottoms.jpg
+hazard.jpg    from nostos assets/textures/panel-metal-1.jpg
+
+Both CC0, David M. Berry's own work.
+
+concrete.jpg clads the datacentre. floor.jpg is tiled into the ground canvas
+for the yard. hazard.jpg is used sparingly, as a
+band on the plant at ground level.
