@@ -301,7 +301,12 @@ const tmpCol = new THREE.Color();
 function sunAt(t) {
   // 0 at sunrise, PI at sunset, negative y through the night.
   const a = (t - 0.25) * Math.PI * 2;
-  sunDir.set(Math.cos(a), Math.sin(a) * Math.cos(SUN_TILT), -Math.sin(a) * Math.sin(SUN_TILT))
+  // THE ARC LEANS SOUTH. It leaned north to begin with, which put the midday sun
+  // behind the datacentre's south face — the one the isometric camera always
+  // looks at — so the wall, its sign and the yard in front of it were in shade
+  // from dawn to dusk and read as black. In the northern hemisphere the sun is
+  // to the south at noon, and +Z is south here.
+  sunDir.set(Math.cos(a), Math.sin(a) * Math.cos(SUN_TILT), Math.sin(a) * Math.sin(SUN_TILT))
         .normalize();
   return sunDir;
 }
@@ -492,8 +497,8 @@ const PLAYER_R = 0.34;
 
 // A BLOCKER HAS A TOP. Without one everything solid is an infinite wall and a
 // jump is only ever a hop on the spot; with one, a log and a gas can are things
-// to clear and a tree is not. The apex is v^2/2g = 7.6^2/48, about 1.2 m, so
-// that is the line between the two by construction rather than by a list.
+// to clear and a tree is not. The apex is v^2/2g, about 2.1 m, so that is the
+// line between the two by construction rather than by a list.
 // Two shapes. A circle suits a trunk or a boulder; it suits a ninety-metre hall
 // very badly — a chain of circles along a wall either leaves gaps between them
 // or stops him a radius short of the whole building. Anything rectilinear gets
@@ -1371,26 +1376,59 @@ function lightTheFire(group, x, z) {
 // after dark.
 const beacons = [];
 const signs = [];
+const yardLamps = [];
 
 // Concrete and hazard panel, both David M. Berry's own CC0 work out of NostOS.
 // A box has one set of UVs across every face, so the repeat has to be set per
 // mesh from its own size or a wall ninety metres long carries one tile of
 // concrete stretched the whole way.
-const siteTex = (file) => {
-  const t = new THREE.TextureLoader().load('../assets/site/' + file);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+// THE PHOTOGRAPHS ARE ALL DARK. Every one of these was shot in daylight on a
+// grey day and comes in around a third of full brightness; multiplied by a grey
+// material tint on top, the datacentre's walls were at about a fifth albedo and
+// read as black however much light was thrown at them. Brightening through a
+// canvas is the only direction that works — a material colour can only darken,
+// and emissive would make the building glow at night.
+//
+// Clones are tracked because the image lands after the meshes are built and a
+// cloned texture does not hear about its source's needsUpdate. The register is
+// a WeakMap and NOT userData: Texture.copy() round-trips userData through
+// JSON, so a list of textures parked there is a circular structure and clone()
+// throws on it.
+const texFamily = new WeakMap();
+const siteTex = (file, gain = 1.0, sat = 1.0) => {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 8;
+  const base = new THREE.CanvasTexture(cv);
+  base.wrapS = base.wrapT = THREE.RepeatWrapping;
+  base.colorSpace = THREE.SRGBColorSpace;
+  base.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const family = [base];
+  texFamily.set(base, family);
+  const img = new Image();
+  img.onload = () => {
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const c = cv.getContext('2d');
+    c.filter = 'brightness(' + gain + ') saturate(' + sat + ')';
+    c.drawImage(img, 0, 0);
+    for (const t of family) t.needsUpdate = true;
+  };
+  img.src = '../assets/site/' + file;
+  return base;
+};
+
+// A clone that stays in the family, so it repaints when the image arrives.
+const siteClone = (tex) => {
+  const t = tex.clone();
+  t.needsUpdate = true;
+  const fam = texFamily.get(tex);
+  if (fam) fam.push(t);
   return t;
 };
-const TEX_CONCRETE = siteTex('concrete.jpg');
-const TEX_HAZARD = siteTex('hazard.jpg');
 
-// The slab photograph was taken in shade and arrives dark. Brightening it
-// through a canvas is the honest fix: a material colour can only ever darken it
-// further, and an emissive term would make the yard glow at night — the mistake
-// the path stones already taught. Used directly rather than cloned, so the
-// redraw when the image lands reaches the texture the apron is holding.
+const TEX_CONCRETE = siteTex('concrete.jpg', 1.85, 0.85);
+const TEX_HAZARD = siteTex('hazard.jpg', 1.15, 0.9);
+
 const TEX_SLAB = (() => {
   const cv = document.createElement('canvas');
   cv.width = cv.height = 8;
@@ -1416,8 +1454,7 @@ const TEX_SLAB = (() => {
 function buildDatacentre() {
   const g = new THREE.Group();
   const clad = (tex, w, h, d, col, tile) => {
-    const t = tex.clone();
-    t.needsUpdate = true;
+    const t = siteClone(tex);
     t.repeat.set(Math.max(w, d) / tile, Math.max(h, d) / tile);
     return new THREE.MeshLambertMaterial({ color: col, map: t });
   };
@@ -1456,33 +1493,32 @@ function buildDatacentre() {
     put(m, 0, 0.17, 0, false);
   }
   // Plinth, then the hall.
-  put(box(W + 2.4, 1.4, D + 2.4, 0x63666a), 0, 0.9, 0, false);
-  put(box(W, H, D, 0x9aa0a4), 0, 1.6 + H / 2, 0);
+  put(box(W + 2.4, 1.4, D + 2.4, 0x9ea3a7), 0, 0.9, 0, false);
+  put(box(W, H, D, 0xf2f2ee), 0, 1.6 + H / 2, 0);
   // A darker band at the top, which is what stops a big box reading as a box.
-  put(box(W + 0.5, 1.6, D + 0.5, 0x5e6266), 0, 1.6 + H - 0.4, 0);
+  put(box(W + 0.5, 1.6, D + 0.5, 0xa8adb1), 0, 1.6 + H - 0.4, 0);
   // Louvred flanks: shallow pilasters down the long sides at a fixed rhythm.
   for (let i = -6; i <= 6; i++) {
     const x = i * (W / 13.5);
-    put(box(1.5, H - 2.4, 0.7, 0x74797d), x, 1.6 + H / 2, D / 2 + 0.3);
-    put(box(1.5, H - 2.4, 0.7, 0x74797d), x, 1.6 + H / 2, -D / 2 - 0.3);
+    put(box(1.5, H - 2.4, 0.7, 0xc9ced2), x, 1.6 + H / 2, D / 2 + 0.3);
+    put(box(1.5, H - 2.4, 0.7, 0xc9ced2), x, 1.6 + H / 2, -D / 2 - 0.3);
   }
 
   // Roof plant, in ranks. Repetition is the whole visual argument of the thing.
   for (let r = -1; r <= 1; r++) {
     for (let i = -7; i <= 7; i++) {
-      const u = put(box(4.2, 2.2, 3.0, 0x9aa0a4, 1.6), i * (W / 15.5), 1.6 + H + 1.1, r * (D / 3.4));
+      const u = put(box(4.2, 2.2, 3.0, 0xdfe3e6, 1.6), i * (W / 15.5), 1.6 + H + 1.1, r * (D / 3.4));
       put(box(3.4, 0.35, 2.4, 0x3f4347, 0), u.position.x, u.position.y + 1.25, u.position.z);
     }
   }
   // Chillers and transformers down the west flank.
   for (let i = -3; i <= 3; i++) {
-    put(box(5.0, 4.0, 7.5, 0x8b9094, 2.2), -W / 2 - 6.5, APRON_H + 2.0, i * 9.2);
+    put(box(5.0, 4.0, 7.5, 0xd2d7da, 2.2), -W / 2 - 6.5, APRON_H + 2.0, i * 9.2);
   }
   // Hazard banding at the foot of the plant, and nowhere else. It is the one
   // loud texture in the kit and a little of it goes a long way.
   for (let i = -3; i <= 3; i++) {
-    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_HAZARD.clone() });
-    m.map.needsUpdate = true;
+    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: siteClone(TEX_HAZARD) });
     m.map.repeat.set(3.2, 0.4);
     const b = new THREE.Mesh(new THREE.BoxGeometry(5.3, 0.55, 7.8), m);
     put(b, -W / 2 - 6.5, APRON_H + 0.28, i * 9.2, false);
@@ -1490,13 +1526,16 @@ function buildDatacentre() {
 
   // Two stacks.
   for (const sx of [W / 2 - 8, W / 2 - 16]) {
-    put(box(2.2, H + 9, 2.2, 0x585c60), sx, 1.6 + (H + 9) / 2, -D / 2 + 5);
+    put(box(2.2, H + 9, 2.2, 0x9ba0a4), sx, 1.6 + (H + 9) / 2, -D / 2 + 5);
   }
 
   // Perimeter fence. Posts and rails are drawn but not solid — the barrier is
   // the four rectangles registered below, which is one test instead of sixty and
   // leaves a gate rather than a post standing in the gateway.
-  const fw = W / 2 + 14, fd = D / 2 + 14;
+  // ON the apron edge. The paving reaches W/2 + 13; at +14 the posts stood a
+  // metre beyond it on terrain 0.35 m lower and floated, and at +11 they were
+  // set two metres back from a kerb that ought to carry them.
+  const fw = W / 2 + 12.4, fd = D / 2 + 12.4;
   const GATE = 7;                                  // half-width of the way in
   for (let i = -14; i <= 14; i++) {
     const x = (i / 14) * fw;
@@ -1654,6 +1693,26 @@ function buildDatacentre() {
   g.add(east);
 
   signs.push(southMat, eastMat);
+
+  // Yard lights. A working site is lit at night, and the apron is the one place
+  // in this world with a reason to be. Poles with a head each, and a point light
+  // that comes up as the daylight goes — no shadows from them, which is what
+  // keeps six of them affordable.
+  for (const [lx, lz] of [[-W / 2 - 12, -D / 2 - 4], [-W / 2 - 12, D / 2 + 4],
+                          [0, D / 2 + 8], [0, -D / 2 - 8],
+                          [W / 2 + 10, -D / 2 - 4], [W / 2 + 10, D / 2 + 4]]) {
+    put(box(0.3, 7.0, 0.3, 0x3d4145, 0), lx, APRON_H + 3.5, lz, false);
+    const headMat = new THREE.MeshLambertMaterial({
+      color: 0x51565b, emissive: new THREE.Color(0xffd9a0), emissiveIntensity: 0,
+    });
+    const head = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.34, 0.8), headMat);
+    head.position.set(lx, APRON_H + 7.1, lz);
+    g.add(head);
+    const lamp = new THREE.PointLight(0xffd2a0, 0, 34, 2);
+    lamp.position.set(lx, APRON_H + 6.7, lz);
+    g.add(lamp);
+    yardLamps.push({ light: lamp, mat: headMat });
+  }
 
   // Beacons. Emissive here is right, unlike on the path stones: these ARE
   // lights, and they should be the only thing of the building visible at night.
@@ -2096,7 +2155,10 @@ let pendingYaw = null;      // a restored heading, applied once the model exists
 // arc is physics and the body holds whatever pose it left the ground in, which
 // reads better than a walk cycle looping in mid-air. A hand-keyed pose is the
 // real fix, the same gap the plan records for archery.
-const GRAVITY = -24, JUMP_V = 7.6;
+// Apex is v^2/2g. At 7.6 that was 1.20 m; 10.0 gives 2.08, which clears the
+// chillers' hazard banding and a good deal of the rock, and still not the fence
+// at 2.95 or anything with a tree on it.
+const GRAVITY = -24, JUMP_V = 10.0;
 
 // Health and stamina, wired to what the world already does rather than shown
 // for decoration. Stamina is what makes SHIFT a choice: run it dry and the legs
@@ -2310,6 +2372,14 @@ function frame(now) {
     // beacon, so it does not pulse.
     const lit = Math.pow(1 - daylight, 1.4) * 0.85;
     for (const m of signs) m.emissiveIntensity = lit;
+  }
+
+  if (yardLamps.length) {
+    const lit = Math.pow(1 - daylight, 1.3);
+    for (const y of yardLamps) {
+      y.light.intensity = lit * 22;
+      y.mat.emissiveIntensity = lit;
+    }
   }
 
   if (beacons.length) {
