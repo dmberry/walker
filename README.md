@@ -52,7 +52,15 @@ Keys: WASD and SHIFT to move, SPACE to jump, CLICK to strike, `[` `]` to turn
 the camera, `-` `=` to zoom, `P` for perspective instead of the 2:1
 orthographic, `1` `2` `0` for stance, `E` `V` `H` `X` for the one-shot clips,
 `L` for shading, `K` for the three light rigs, `G` for the isometric lattice,
-and `,` `.` to trim the walk pace (`SHIFT` with them for run).
+`M` and `8` `9` for the wind, `,` `.` to trim the walk pace (`SHIFT` with them
+for run) and `;` `'` for the size of the held weapon.
+
+Health and stamina are wired to what the world already does rather than shown
+for decoration: SHIFT spends stamina and drops back to a walk when it is gone,
+health returns only after a spell of not being hit, and at zero he goes down and
+gets back up at the camp a few seconds later. The wind is synthesised — pink
+noise through a lowpass whose corner and level are walked by two slow sines — so
+the page still needs no assets and nothing that can fail to load.
 
 The ground is value noise in three octaves with a ridge pass and a terrace pass,
 all of it behind one `heightAt()` that the plane's vertices, every tree, rock,
