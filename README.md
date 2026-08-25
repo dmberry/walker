@@ -235,6 +235,15 @@ _tmp/            every pack in full. Nothing here ships.
 what texture size, so the import can be repeated rather than remembered.
 Everything is CC0 from Quaternius; each folder carries its licence.
 
+## Licence
+
+**Walker is free software, licensed GPL-3.0-or-later.** See `LICENSE` for the
+full text and `COPYRIGHT` for the notice and the third-party material.
+
+The GPL covers the code. The art does not travel under it: everything in
+`assets/` and `models/` is CC0, and three.js in `vendor/` is MIT. `COPYRIGHT`
+lists each one, and every asset folder carries the licence it shipped with.
+
 ## Licences
 
 The Quaternius packs in `sprites/` are CC0. three.js in `vendor/` is MIT.

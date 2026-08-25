@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Walker — Copyright (C) 2026 David M. Berry
+# GNU General Public License v3 or later. See LICENSE.
 """Copy the grip constants and the item->model table out of the previewer and
 into docs/character-3d-plan.md.
 

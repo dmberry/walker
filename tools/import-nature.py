@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Walker — Copyright (C) 2026 David M. Berry
+# GNU General Public License v3 or later. See LICENSE.
 """Copy the handful of Stylized Nature MegaKit models the game uses out of the
 gitignored _tmp/ and into assets/nature, downscaling their textures on the way.
 
