@@ -426,19 +426,27 @@ function groundTexture() {
   // radial gradient falling to nothing at its rim instead, so there is tone
   // without an outline anywhere, and the context is scaled before the arc so
   // they are not all perfect rounds.
-  for (let i = 0; i < 850; i++) {
-    const x = rand() * N, y = rand() * N;
-    const r = (5 + rand() * 24) * P;
-    const hue = 80 + rand() * 20, sat = 24 + rand() * 16, lum = 36 + rand() * 20;
-    const a = 0.10 + rand() * 0.17;
-    const col = (mul) => 'hsla(' + hue + ',' + sat + '%,' + lum + '%,' + (a * mul).toFixed(3) + ')';
+  //
+  // COLOUR FOLLOWS THE GROUND. Scattering hues at random gave variation that
+  // averaged out to one green across any stretch you could see. Sampling the
+  // terrain under each patch instead means the high ground goes dry and yellow
+  // and the hollows stay lush, so the colour changes as you walk rather than
+  // just being busy.
+  const patch = (px, py, r, alpha, spread) => {
+    const wx = px / P - WORLD / 2, wz = py / P - WORLD / 2;
+    const dry = Math.min(1, Math.max(0, (heightAt(wx, wz) - 1.5) / 9));
+    const hue = 94 - dry * 30 + (rand() - 0.5) * spread;
+    const sat = 20 + dry * 20 + rand() * 16;
+    const lum = 30 + dry * 16 + rand() * 18;
+    const col = (mul) => 'hsla(' + hue.toFixed(1) + ',' + sat.toFixed(1) + '%,'
+                       + lum.toFixed(1) + '%,' + (alpha * mul).toFixed(3) + ')';
     const grd = g.createRadialGradient(0, 0, 0, 0, 0, r);
     grd.addColorStop(0.0, col(1));
     grd.addColorStop(0.45, col(0.62));
     grd.addColorStop(0.78, col(0.22));
     grd.addColorStop(1.0, col(0));
     g.save();
-    g.translate(x, y);
+    g.translate(px, py);
     g.rotate(rand() * 3.14);
     g.scale(1, 0.55 + rand() * 0.7);
     g.fillStyle = grd;
@@ -446,6 +454,15 @@ function groundTexture() {
     g.arc(0, 0, r, 0, 6.29);
     g.fill();
     g.restore();
+  };
+
+  // Country-sized first, so one part of the map is not the colour of another.
+  for (let i = 0; i < 70; i++) {
+    patch(rand() * N, rand() * N, (26 + rand() * 46) * P, 0.20 + rand() * 0.16, 26);
+  }
+  // Then field-sized, which is the scale you actually walk across.
+  for (let i = 0; i < 850; i++) {
+    patch(rand() * N, rand() * N, (5 + rand() * 24) * P, 0.10 + rand() * 0.17, 18);
   }
 
   // Grain, kept because it stops the large shapes banding, and taken right down
@@ -864,9 +881,9 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   for (const pts of TRACKS) {
     let laid = false, run = 0;
     for (let i = 2; i < pts.length - 1; i++) {
-      if (run <= 0) { laid = scatter() < 0.30; run = 6 + (scatter() * 20 | 0); }
+      if (run <= 0) { laid = scatter() < 0.42; run = 6 + (scatter() * 16 | 0); }
       run--;
-      if (!laid || (i % 3)) continue;
+      if (!laid || (i % 2)) continue;
       const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
       const ang = Math.atan2(z1 - z0, x1 - x0);
       const lat = (scatter() - 0.5) * TRACK_WIDTH * 0.5;
@@ -879,8 +896,8 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
       // Fitted across rather than up, and small: these are single flags of stone
       // worn into the path, not slabs laid on it. Set deep enough that mostly
       // what shows is the top face, which is all a trodden-in stone shows.
-      const st = plant(src, x, z, 0.20 + scatter() * 0.16, scatter() * Math.PI * 2, { fit: 'width' });
-      st.position.y -= 0.05 + scatter() * 0.04;
+      const st = plant(src, x, z, 0.46 + scatter() * 0.30, scatter() * Math.PI * 2, { fit: 'width' });
+      st.position.y -= 0.01 + scatter() * 0.02;
       sceneryCount++;
     }
   }
@@ -1339,6 +1356,7 @@ addEventListener('resize', resize);
 
 // -------------------------------------------------------------------- loop --
 const pos = new THREE.Vector3(0, 0, 4);
+let moved = 0;
 // NO JUMP CLIP EXISTS. Not in this 13-clip glb and not in the 24-clip source
 // either — the nearest thing the pack ships is Roll, which is a dodge. So the
 // arc is physics and the body holds whatever pose it left the ground in, which
@@ -1351,7 +1369,7 @@ const GRAVITY = -24, JUMP_V = 7.6;
 // drop back to a walk until it comes round. Health regenerates, but only after
 // a spell of not being hit.
 let health = 100, stamina = 100;
-let hurtCooldown = 0, dead = false, deadFor = 0;
+let hurtCooldown = 0, dead = false, deadFor = 0, winded = false;
 const STA_DRAIN = 19, STA_REGEN = 13, STA_REST = 24;
 const HP_REGEN = 5.5, HP_CALM = 5.0;
 const RESPAWN_AFTER = 3.4;
@@ -1385,7 +1403,15 @@ function frame(now) {
   if (held.has('a')) vel.sub(r);
   }
 
-  const running = held.has('shift') && stamina > 1 && !dead;
+  // WINDED IS A STATE, NOT A THRESHOLD. Gating the run on `stamina > 1` sets up
+  // a limit cycle at the bottom of the bar: the last of it is spent, the gait
+  // drops to a walk, walking regenerates faster than one frame spends, so the
+  // next frame is a run again — and play() reset()s the clip on every switch,
+  // which is the legs stuttering. Once he is out, he stays out until he has got
+  // a quarter of it back.
+  if (stamina <= 0.5) winded = true;
+  else if (winded && stamina >= 25) winded = false;
+  const running = held.has('shift') && !winded && !dead;
   const gait = running ? 'Run' : 'Walk';
   const pace = running ? runPace : walkPace;
   const want = REFS[gait] * pace;
@@ -1407,9 +1433,13 @@ function frame(now) {
       return dh <= STEP_UP || dh / LOOKAHEAD <= MAX_CLIMB;
     };
     const dx = vel.x * dt, dz = vel.z * dt;
+    const was = { x: pos.x, z: pos.z };
     if (passable(dx, dz)) { pos.x += dx; pos.z += dz; }
     else if (passable(dx, 0)) { pos.x += dx; }
     else if (passable(0, dz)) { pos.z += dz; }
+    // What he covered, not what he intended. Pressed against a trunk the legs
+    // used to keep running at full rate on the spot.
+    moved = Math.hypot(pos.x - was.x, pos.z - was.z) / Math.max(dt, 1e-5);
     // THE MODEL FACES +Z, so its forward goes to (sin t, 0, cos t) and the yaw
     // is atan2(x, z). Assuming -Z mirrors every angle, which is the mistake the
     // plan records having already made once.
@@ -1420,7 +1450,7 @@ function frame(now) {
       while (d < -Math.PI) d += Math.PI * 2;
       root.rotation.y += d * Math.min(1, dt * 14);
     }
-    speed = want;
+    speed = moved;
   } else {
     speed = 0;
   }
