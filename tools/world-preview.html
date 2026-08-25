@@ -648,10 +648,39 @@ const CAMP = [
   ['Raft',          -8.4,  -6.0, 0.34,  0.35],
 ];
 let propsLoaded = 0;
+let fire = null;
 for (const [name, x, z, h, yaw] of CAMP) {
   loadProp(name)
-    .then(g => { place(g, x, z, h, yaw); propsLoaded++; })
+    .then(g => {
+      place(g, x, z, h, yaw);
+      propsLoaded++;
+      if (name === 'Bonfire_Fire') fire = lightTheFire(g, x, z);
+    })
     .catch(() => fail('prop missing: ' + name));
+}
+
+// A FIRE IS A LIGHT, NOT A PICTURE OF ONE. The pack ships the flame as its own
+// material (Fire, 88 of the model's 390 faces) with Ke 0, so it arrives as a
+// dull orange solid that lights nothing. Two things are needed: an emissive
+// term, so the flame itself is brighter than any light falling on it, and a
+// point light, so the ground, the logs and the figure are lit BY it.
+//
+// The flicker is three sines at unrelated rates rather than a random walk —
+// noise reads as a fault, and a fire's unsteadiness has a rhythm to it.
+function lightTheFire(group, x, z) {
+  const mats = [];
+  group.traverse(o => {
+    if (!o.isMesh || o.name !== 'Fire') return;
+    o.castShadow = false;                     // a flame does not cast a shadow
+    o.material.color.setHex(0xff7d24);
+    o.material.emissive = new THREE.Color(0xff6a12);
+    o.material.emissiveIntensity = 1;
+    mats.push(o.material);
+  });
+  const light = new THREE.PointLight(0xff8a34, 7.5, 16, 2);
+  light.position.set(x, heightAt(x, z) + 0.6, z);
+  scene.add(light);
+  return { light, mats, base: 7.5 };
 }
 
 // ------------------------------------------------------------- character ----
@@ -705,7 +734,7 @@ new GLTFLoader().load('../models/adventurer-m.glb', gltf => {
 // every isometric game takes with a held item. `;` and `'` trim it live.
 const HELD = {
   sword: { dir: SURV, of: 'Knife',    len: 0.98, rot: [12, -174, -15], off: [-0.02, 0.16, -0.03] },
-  gun:   { dir: GUNS, of: 'Pistol_1', len: 0.42, rot: [180, 180, -90], off: [-0.02, 0.14, -0.02] },
+  gun:   { dir: GUNS, of: 'Pistol_1', len: 0.62, rot: [180, 180, -90], off: [-0.02, 0.14, -0.02] },
 };
 let heldGroup = null, heldKind = null, pendingHeld = null, heldTrim = 1.0;
 const heldCache = new Map();
@@ -1009,6 +1038,14 @@ function frame(now) {
       clipName = nm;
     }
     mixer.update(dt);
+  }
+
+  if (fire) {
+    const t = now * 0.001;
+    const f = 0.70 + 0.30 * (Math.sin(t * 11.3) * 0.5 + Math.sin(t * 7.1 + 1.7) * 0.3
+                           + Math.sin(t * 23.7 + 0.4) * 0.2);
+    fire.light.intensity = fire.base * f;
+    for (const m of fire.mats) m.emissiveIntensity = 0.7 + f * 0.6;
   }
 
   target.lerp(new THREE.Vector3(pos.x, pos.y + 1.0, pos.z), Math.min(1, dt * 7));
