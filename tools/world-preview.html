@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="cache-control" content="no-store">
 <title>Walker — world preview</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #8fb6c8;
@@ -108,6 +109,9 @@ const ISO_ELEV_DEG = 26.565;
 // measurement returned, and the plan's guessed Walk of 2.6 was well under, which
 // is why the legs outran the ground.
 const REFS = { Walk: 3.56, Run: 7.00, Run_Shoot: 6.71 };
+// Filled in at load from the clips themselves; these are only the fallback.
+const CONTACTS = { Walk: [0.25, 0.75], Run: [0.25, 0.75], Run_Shoot: [0.25, 0.75] };
+let stepPhase = 0;
 // THE CLIP LEADS AND THE GROUND FOLLOWS. Driving the rate from a chosen speed
 // meant two numbers that had to agree and did not. Inverted, there is only one:
 // pace is the playback rate, the body travels at the clip's own measured speed
@@ -809,7 +813,9 @@ new GLTFLoader().load('../models/adventurer-m.glb', gltf => {
   mixer.addEventListener('finished', () => { locked = false; });
   for (const name of Object.keys(REFS)) {
     const m = measureRef(name);
-    if (m) REFS[name] = +(m.refSpeed * root.scale.x).toFixed(2);
+    if (!m) continue;
+    REFS[name] = +(m.refSpeed * root.scale.x).toFixed(2);
+    if (m.contacts && m.contacts.length) CONTACTS[name] = m.contacts;
   }
   play('Idle');
   if (pendingHeld) { const k = pendingHeld; pendingHeld = null; setHeld(k); }
@@ -959,7 +965,41 @@ function startWind() {
 
   // Comes up over a few seconds rather than switching on.
   master.gain.linearRampToValueAtTime(1, ctx.currentTime + 4);
-  wind = { ctx, body, bodyGain, airGain, master };
+  // One short noise buffer, made here and borrowed by every footstep. A step is
+  // a filtered burst of it under a fast envelope; nothing is sampled.
+  const stepLen = Math.floor(ctx.sampleRate * 0.3);
+  const stepBuf = ctx.createBuffer(1, stepLen, ctx.sampleRate);
+  const sd = stepBuf.getChannelData(0);
+  for (let i = 0; i < stepLen; i++) sd[i] = Math.random() * 2 - 1;
+
+  wind = { ctx, body, bodyGain, airGain, master, stepBuf };
+}
+
+// Grass gives a soft low thud with no top to it; chalk and flint give the same
+// thud with a short bright scatter over it. Same burst, different filter.
+function footstep(onChalk, hard) {
+  if (!wind || muted) return;
+  const { ctx, stepBuf } = wind;
+  const t0 = ctx.currentTime;
+  const level = (hard ? 0.055 : 0.034) * (onChalk ? 1.15 : 1) * (0.82 + Math.random() * 0.36);
+
+  const src = ctx.createBufferSource();
+  src.buffer = stepBuf;
+  src.playbackRate.value = 0.85 + Math.random() * 0.3;
+
+  const f = ctx.createBiquadFilter();
+  if (onChalk) { f.type = 'bandpass'; f.frequency.value = 1250 + Math.random() * 700; f.Q.value = 0.7; }
+  else { f.type = 'lowpass'; f.frequency.value = 620 + Math.random() * 260; f.Q.value = 0.9; }
+
+  const env = ctx.createGain();
+  const dur = onChalk ? 0.13 : 0.10;
+  env.gain.setValueAtTime(0.0001, t0);
+  env.gain.exponentialRampToValueAtTime(level, t0 + 0.008);
+  env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+  src.connect(f); f.connect(env); env.connect(ctx.destination);
+  src.start(t0);
+  src.stop(t0 + dur + 0.02);
 }
 
 function updateWind(t) {
@@ -972,8 +1012,8 @@ function updateWind(t) {
   // Ambient, not weather. It should sit under everything and be the thing you
   // notice when it stops, so the level is well below where it reads as an
   // effect. `8` and `9` trim it, `M` stops it.
-  bodyGain.gain.setTargetAtTime(muted ? 0 : (0.005 + g * 0.013) * windVol, now, 0.7);
-  airGain.gain.setTargetAtTime(muted ? 0 : Math.pow(g, 2.4) * 0.004 * windVol, now, 0.7);
+  bodyGain.gain.setTargetAtTime(muted ? 0 : (0.0004 + g * 0.0011) * windVol, now, 0.7);
+  airGain.gain.setTargetAtTime(muted ? 0 : Math.pow(g, 2.4) * 0.0004 * windVol, now, 0.7);
 }
 
 // Browsers will not start audio without a gesture, so the first key or click
@@ -1269,6 +1309,22 @@ function frame(now) {
 
   updateWind(now * 0.001);
 
+  // Footfalls, fired off the clip's own contact phases rather than a timer, so
+  // the sound lands with the foot however the pace is trimmed.
+  if (current && !airborne && speed > 0.01) {
+    const clip = current.getClip();
+    const marks = CONTACTS[clip.name];
+    if (marks) {
+      const ph = (current.time % clip.duration) / clip.duration;
+      const passed = (m) => stepPhase <= ph ? (stepPhase < m && ph >= m)
+                                            : (stepPhase < m || ph >= m);
+      for (const m of marks) if (passed(m)) footstep(onTrack(pos.x, pos.z, 0.2), running);
+      stepPhase = ph;
+    }
+  } else {
+    stepPhase = 0;
+  }
+
   if (fire) {
     const t = now * 0.001;
     const f = 0.70 + 0.30 * (Math.sin(t * 11.3) * 0.5 + Math.sin(t * 7.1 + 1.7) * 0.3
@@ -1292,7 +1348,8 @@ function frame(now) {
     'model    ' + rawH.toFixed(2) + ' raw -> ' + modelH.toFixed(2) + ' m   props ' + propsLoaded + '/' + CAMP.length;
 
   perf.textContent = fps + ' fps   ' + (renderer.info.render.triangles / 1000 | 0) + 'k tris   '
-                   + renderer.info.render.calls + ' calls';
+                   + renderer.info.render.calls + ' calls   wind '
+                   + (!wind ? 'off' : muted ? 'muted' : windVol.toFixed(2));
 
   requestAnimationFrame(frame);
 }
@@ -1322,12 +1379,15 @@ function measureRef(clipName, samples = 240) {
 
   const v = new THREE.Vector3();
   const traces = feet.map(() => []);
+  const heights = feet.map(() => []);
   for (let i = 0; i < samples; i++) {
     mixer.setTime((i / samples) * clip.duration);
     root.updateMatrixWorld(true);
     feet.forEach((b, k) => {
       v.setFromMatrixPosition(b.matrixWorld);
-      traces[k].push(root.worldToLocal(v.clone()).z);
+      const local = root.worldToLocal(v.clone());
+      traces[k].push(local.z);
+      heights[k].push(local.y);
     });
   }
 
@@ -1346,6 +1406,10 @@ function measureRef(clipName, samples = 240) {
     strideEach: strides.map(x => +x.toFixed(3)),
     // In the root's OWN units. The caller multiplies by root.scale to get metres.
     refSpeed: +((stride * feet.length) / clip.duration).toFixed(2),
+    // WHERE THE FEET LAND, as a fraction of the cycle. Taken from the lowest
+    // point of each foot's arc rather than guessed at quarter and three
+    // quarters, so a step lands with the step rather than near it.
+    contacts: heights.map(h => h.indexOf(Math.min(...h)) / h.length).sort((a, b) => a - b),
   };
 }
 
