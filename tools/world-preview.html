@@ -315,7 +315,13 @@ function applyLight() {
   // horizon, and nothing at all once it is properly down.
   const low = Math.max(0, 1 - Math.abs(dir.y) * 6) * (dir.y > -0.12 ? 1 : 0);
 
-  key.intensity = 2.5 * Math.pow(day, 0.7);
+  // SHADOWS ARE ONLY AS DARK AS THE FILL IS WEAK. Nothing sets shadow darkness
+  // in three.js: a shadowed surface simply loses the sun and keeps whatever the
+  // sky and the bounce give it. With a 2.5 key against a 0.89 hemisphere that
+  // left the shaded side of the datacentre at about a sixth of the lit side and
+  // reading as black. Bringing the key down and the sky up puts it near half,
+  // which is what an overcast-ish day actually looks like.
+  key.intensity = 2.0 * Math.pow(day, 0.7);
   key.color.copy(SUN_LOW).lerp(SUN_HIGH, Math.min(1, up * 2.6));
 
   // The moon takes over as the sun goes, from the opposite side of the sky.
@@ -324,10 +330,10 @@ function applyLight() {
   moon.intensity = 0.42 * night;
   moon.color.setHex(0x9fb6d8);
 
-  hemi.intensity = 0.17 + day * 0.72;
+  hemi.intensity = 0.20 + day * 1.30;
   hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, day);
-  hemi.groundColor.setHex(0x2a3024).lerp(new THREE.Color(0x4a5240), day);
-  rim.intensity = 0.10 + day * 0.28;
+  hemi.groundColor.setHex(0x2a3024).lerp(new THREE.Color(0x6b7360), day);
+  rim.intensity = 0.12 + day * 0.46;
 
   tmpCol.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_LOW, low * 0.75);
   scene.background.copy(tmpCol);
@@ -741,10 +747,10 @@ function groundTexture() {
     const cx = (DC.x + WORLD / 2) * P, cz = (DC.z + WORLD / 2) * P;
     const hw = (DC.w / 2 + 22) * P, hd = (DC.d / 2 + 22) * P;
     const yard = g.createRadialGradient(cx, cz, 0, cx, cz, hw);
-    yard.addColorStop(0.0, 'rgba(126,127,120,0.92)');
-    yard.addColorStop(0.62, 'rgba(126,127,120,0.88)');
-    yard.addColorStop(0.86, 'rgba(122,122,112,0.42)');
-    yard.addColorStop(1.0, 'rgba(120,120,110,0)');
+    yard.addColorStop(0.0, 'rgba(168,169,161,0.94)');
+    yard.addColorStop(0.62, 'rgba(166,167,158,0.90)');
+    yard.addColorStop(0.86, 'rgba(158,158,148,0.44)');
+    yard.addColorStop(1.0, 'rgba(154,154,144,0)');
     g.save();
     g.translate(cx, cz);
     g.scale(1, hd / hw);
@@ -756,7 +762,7 @@ function groundTexture() {
     // Stains and patching, so the concrete is not one flat grey.
     for (let i = 0; i < 900; i++) {
       const ex = (rand() - 0.5) * hw * 1.7, ez = (rand() - 0.5) * hd * 1.7;
-      const v = 96 + rand() * 54 | 0;
+      const v = 132 + rand() * 58 | 0;
       g.fillStyle = 'rgba(' + v + ',' + (v + 1) + ',' + (v - 6) + ',' + (0.05 + rand() * 0.13).toFixed(2) + ')';
       g.beginPath();
       g.ellipse(cx + ex, cz + ez, (0.5 + rand() * 3.4) * P, (0.4 + rand() * 2.2) * P, rand() * 3.14, 0, 6.29);
@@ -926,10 +932,14 @@ const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: groundTe
     g2.ellipse(cx, cz, hw, hd, 0, 0, 6.29);
     g2.clip();
     const tile = 4.5 * P2;                     // metres per repeat
+    // The yard photograph is another shaded one; without this the concrete
+    // arrives darker than the grass beside it, which no yard ever is.
+    g2.filter = 'brightness(1.5) saturate(0.75)';
     g2.globalAlpha = 0.92;
     for (let x = cx - hw; x < cx + hw; x += tile) {
       for (let z = cz - hd; z < cz + hd; z += tile) g2.drawImage(img, x, z, tile, tile);
     }
+    g2.filter = 'none';
     g2.restore();
     groundMat.map.needsUpdate = true;
   };
@@ -948,20 +958,32 @@ groundMat.onBeforeCompile = (sh) => {
   sh.uniforms.detailMap = { value: detailTex };
   sh.uniforms.detailRepeat = { value: WORLD / DETAIL_TILE };
   sh.uniforms.detailStrength = { value: 1.05 };
+  // The detail map is a photograph of GRASS, multiplied in as brightness. Over
+  // the yard it was stamping grass-shaped shadow onto concrete and dragging it
+  // down — so it fades out inside the fence, where the canvas already carries
+  // the right surface.
+  sh.uniforms.yardMid = { value: new THREE.Vector2(DC.x, DC.z) };
+  sh.uniforms.yardHalf = { value: new THREE.Vector2(DC.w / 2 + 20, DC.d / 2 + 20) };
+  sh.uniforms.worldSize = { value: WORLD };
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec2 vGroundUv;')
     .replace('#include <uv_vertex>', '#include <uv_vertex>\n\tvGroundUv = uv;');
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>',
       '#include <common>\nuniform sampler2D detailMap;\nuniform float detailRepeat;\n'
-      + 'uniform float detailStrength;\nvarying vec2 vGroundUv;')
+      + 'uniform float detailStrength;\nuniform vec2 yardMid;\nuniform vec2 yardHalf;\n'
+      + 'uniform float worldSize;\nvarying vec2 vGroundUv;')
     .replace('#include <map_fragment>',
       '#include <map_fragment>\n'
       // Luminance around its own middle, so the detail adds contrast without
       // dragging the whole ground darker or greener than the canvas painted it.
       + '\tvec3 dTex = texture2D(detailMap, vGroundUv * detailRepeat).rgb;\n'
       + '\tfloat dLum = dot(dTex, vec3(0.299, 0.587, 0.114));\n'
-      + '\tdiffuseColor.rgb *= 1.0 + (dLum - 0.42) * detailStrength;');
+      + '\tvec2 wp = vec2(vGroundUv.x * worldSize - worldSize * 0.5,\n'
+      + '\t               worldSize * 0.5 - vGroundUv.y * worldSize);\n'
+      + '\tvec2 q = abs(wp - yardMid) / yardHalf;\n'
+      + '\tfloat onYard = 1.0 - smoothstep(0.75, 1.05, max(q.x, q.y));\n'
+      + '\tdiffuseColor.rgb *= 1.0 + (dLum - 0.42) * detailStrength * (1.0 - onYard * 0.88);');
 };
 const groundGeo = new THREE.PlaneGeometry(240, 240, 288, 288);
 {
@@ -1539,25 +1561,34 @@ function buildDatacentre() {
         size *= (w * 0.90) / width;
       }
 
-      // The letters carry the panel's own texture, so they weather with it
-      // rather than sitting on top looking freshly applied. Drawn to their own
-      // canvas and the metal punched through them with source-in.
+      // The letters carry the panel's own metal, so they weather with the sign
+      // rather than sitting on it looking freshly applied.
+      //
+      // SOURCE-IN IS DESTRUCTIVE PER DRAW CALL. Tiling the texture over the
+      // letters with it set erased the canvas: the first tile kept its own
+      // region and cleared everything else, then each tile after it cleared
+      // what the one before had kept, and the name vanished. It has to be one
+      // composite over the whole canvas, so the mask is built separately and
+      // applied once.
+      const maskC = document.createElement('canvas');
+      maskC.width = w; maskC.height = h;
+      const mk = maskC.getContext('2d');
+      mk.font = c.font;
+      mk.textAlign = 'center';
+      mk.textBaseline = 'middle';
+      mk.fillStyle = '#ffffff';
+      let x = w / 2 - width / 2;
+      for (const ch of chars) {
+        const cw = mk.measureText(ch).width;
+        mk.fillText(ch, x + cw / 2, h * 0.52);
+        x += cw + sp;
+      }
+
       const lc = document.createElement('canvas');
       lc.width = w; lc.height = h;
       const l = lc.getContext('2d');
-      l.font = c.font;
-      l.textAlign = 'center';
-      l.textBaseline = 'middle';
-      l.fillStyle = '#ffffff';
-      let x = w / 2 - width / 2;
-      for (const ch of chars) {
-        const cw = l.measureText(ch).width;
-        l.fillText(ch, x + cw / 2, h * 0.52);
-        x += cw + sp;
-      }
-      l.globalCompositeOperation = 'source-in';
       if (signImg.complete && signImg.naturalWidth) {
-        l.filter = 'brightness(2.6) saturate(0.42)';
+        l.filter = 'brightness(2.2) saturate(0.30)';
         const tile = h * 0.9;
         for (let tx = 0; tx < w; tx += tile) {
           l.drawImage(signImg, tx, 0, tile, tile);
@@ -1568,6 +1599,14 @@ function buildDatacentre() {
         l.fillStyle = '#f2f6f8';
         l.fillRect(0, 0, w, h);
       }
+      // Mostly paint, a little metal: at full strength the stripes run straight
+      // through the letterforms and the name stops being readable.
+      l.fillStyle = 'rgba(240, 244, 247, 0.80)';
+      l.fillRect(0, 0, w, h);
+      // One op, covering the whole canvas — the letters are cut out of the
+      // finished plate rather than the plate being cut down to the letters.
+      l.globalCompositeOperation = 'destination-in';
+      l.drawImage(maskC, 0, 0);
       l.globalCompositeOperation = 'source-over';
 
       // A drop shadow under the whole word, because a painted plate behind the
