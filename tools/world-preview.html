@@ -365,56 +365,115 @@ function groundTexture() {
 
   // Chalk, the way a Downs path reads: worn through rather than laid down.
   //
-  // Two earlier versions failed here. The first drew it like a road, one hard
-  // pale stripe with an edge. The second leaned on the canvas blur filter and
-  // low alpha, and the path all but disappeared — measured on-path (127,167,94)
-  // against off-path (139,183,111), which is to say no path at all.
+  // Three earlier versions failed here. A ribbon of quads floating above the
+  // ground vanished into it. A blurred stroke at low alpha vanished too —
+  // measured on-path (127,167,94) against off-path (139,183,111). Stacked
+  // strokes fixed the visibility but left a drawn thing: constant width, clean
+  // parallel edges, a road rather than a trail.
   //
-  // Softness comes from stacking instead: five strokes, widest and faintest
-  // first, so the edge falls away through the stack and the middle builds up.
-  // No filter involved, and the result can be checked by reading the pixels.
-  g.lineCap = 'round';
-  g.lineJoin = 'round';
-  const stroke = (pts, w, col, from = 0, to = 1) => {
-    g.strokeStyle = col;
-    g.lineWidth = w * P;
-    const a = Math.floor(from * (pts.length - 1)), b = Math.ceil(to * (pts.length - 1));
+  // So it is stamped, not stroked. Several hundred small ellipses scattered
+  // along the line with jittered offset, size and angle, and the ragged edge
+  // falls out of the scatter rather than being drawn. The same stamps are run
+  // twice, once to drain the saturation and once to lay the chalk, so the grey
+  // underneath has exactly the same ragged outline as the pale on top.
+  const alongPath = (pts, spacing) => {
+    const out = [];
+    let carry = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, z0] = pts[i], [x1, z1] = pts[i + 1];
+      const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz) || 1e-6;
+      const ang = Math.atan2(dz, dx);
+      for (let t = carry; t < L; t += spacing) out.push([x0 + dx * (t / L), z0 + dz * (t / L), ang]);
+      carry = Math.max(0, carry + Math.ceil((L - carry) / spacing) * spacing - L);
+    }
+    return out;
+  };
+  const blob = (x, z, rx, rz, ang, style) => {
+    g.fillStyle = style;
     g.beginPath();
-    g.moveTo(toX(pts[a][0]), toY(pts[a][1]));
-    for (let i = a + 1; i <= b; i++) g.lineTo(toX(pts[i][0]), toY(pts[i][1]));
-    g.stroke();
+    g.ellipse(toX(x), toY(z), rx * P, rz * P, ang, 0, 6.29);
+    g.fill();
   };
 
+  const stamps = [];
   for (const pts of TRACKS) {
-    // Take the green out first. A translucent pale layer over saturated turf
-    // only ever makes lighter turf; draining the saturation is the difference
-    // between paler grass and bare ground.
-    g.globalCompositeOperation = 'saturation';
-    g.globalAlpha = 0.85;
-    stroke(pts, TRACK_WIDTH * 1.9, 'hsl(0,0%,50%)');
-    g.globalAlpha = 1;
-    g.globalCompositeOperation = 'source-over';
-
-    for (const [w, a] of [[2.45, 0.09], [1.75, 0.13], [1.25, 0.17], [0.85, 0.19], [0.50, 0.17]]) {
-      stroke(pts, TRACK_WIDTH * w, 'rgba(207,204,191,' + a + ')');
-    }
-    // A trail is not uniform. A few stretches take more wear than the rest,
-    // which breaks the stripe up without drawing an edge anywhere.
-    for (let k = 0; k < 8; k++) {
-      const from = rand() * 0.85, to = Math.min(1, from + 0.04 + rand() * 0.10);
-      stroke(pts, TRACK_WIDTH * (0.35 + rand() * 0.5),
-             'rgba(216,213,199,' + (0.10 + rand() * 0.12).toFixed(2) + ')', from, to);
+    const samples = alongPath(pts, 0.30);
+    let skipUntil = -1;
+    // How worn the path is wanders along its length, so some stretches are bare
+    // and others are barely a line through the grass.
+    for (let i = 0; i < samples.length; i++) {
+      const [x, z, ang] = samples[i];
+      if (i < skipUntil) continue;
+      // Every so often the grass has taken it back entirely.
+      if (rand() < 0.010) { skipUntil = i + 4 + (rand() * 14 | 0); continue; }
+      const wear = 0.58 + 0.42 * noise2(x * 0.055 + 4.1, z * 0.055 - 2.7);
+      const n = 2 + (rand() * 3 | 0);
+      for (let k = 0; k < n; k++) {
+        const lat = (rand() - 0.5) * TRACK_WIDTH * (0.75 + wear * 0.7);
+        stamps.push({
+          x: x + Math.cos(ang + Math.PI / 2) * lat,
+          z: z + Math.sin(ang + Math.PI / 2) * lat,
+          rx: 0.26 + rand() * 0.52,
+          rz: 0.18 + rand() * 0.36,
+          ang: ang + (rand() - 0.5) * 1.4,
+          a: (0.09 + rand() * 0.13) * wear,
+        });
+      }
     }
   }
 
-  // Grit, sparse and low-contrast — enough to break the fill up close and
-  // invisible at walking distance.
-  for (let i = 0; i < 1800; i++) {
-    const pts = TRACKS[(rand() * TRACKS.length) | 0];
-    const k = (rand() * (pts.length - 1)) | 0;
-    const off = (rand() - 0.5) * TRACK_WIDTH * 0.9;
-    g.fillStyle = 'rgba(' + (128 + rand() * 70 | 0) + ',' + (126 + rand() * 68 | 0) + ',' + (112 + rand() * 62 | 0) + ',0.28)';
-    g.fillRect(toX(pts[k][0] + off), toY(pts[k][1] + off * 0.4), 1 + rand() * 2, 1 + rand() * 2);
+  // A faint continuous underlay first. Stamps alone gave a genuinely ragged
+  // path — measured on-path (149,149,139) against green — but at walking zoom
+  // it stopped reading as a ROUTE, because a trail is recognised by its
+  // continuity and the scatter kept breaking it. This carries the line; the
+  // stamps carry the edge.
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  const underlay = (w, style, alpha, mode) => {
+    g.save();
+    g.globalCompositeOperation = mode;
+    g.globalAlpha = alpha;
+    g.strokeStyle = style;
+    g.lineWidth = w * P;
+    for (const pts of TRACKS) {
+      g.beginPath();
+      g.moveTo(toX(pts[0][0]), toY(pts[0][1]));
+      for (let i = 1; i < pts.length; i++) g.lineTo(toX(pts[i][0]), toY(pts[i][1]));
+      g.stroke();
+    }
+    g.restore();
+  };
+  underlay(TRACK_WIDTH * 0.72, 'hsl(0,0%,50%)', 0.62, 'saturation');
+  underlay(TRACK_WIDTH * 0.62, 'rgb(203,200,187)', 0.30, 'source-over');
+
+  g.globalCompositeOperation = 'saturation';
+  for (const b of stamps) {
+    g.globalAlpha = Math.min(1, b.a * 3.8);
+    blob(b.x, b.z, b.rx * 1.12, b.rz * 1.12, b.ang, 'hsl(0,0%,50%)');
+  }
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+  for (const b of stamps) blob(b.x, b.z, b.rx, b.rz, b.ang, 'rgba(207,204,191,' + b.a.toFixed(3) + ')');
+
+  // Turf growing back in from both sides, which is what stops the edge reading
+  // as an edge at all.
+  for (const pts of TRACKS) {
+    for (const [x, z, ang] of alongPath(pts, 0.42)) {
+      if (rand() > 0.42) continue;
+      const side = rand() < 0.5 ? 1 : -1;
+      const lat = side * TRACK_WIDTH * (0.28 + rand() * 0.55);
+      blob(x + Math.cos(ang + Math.PI / 2) * lat, z + Math.sin(ang + Math.PI / 2) * lat,
+           0.22 + rand() * 0.45, 0.16 + rand() * 0.32, rand() * 3.14,
+           'hsla(' + (80 + rand() * 26) + ',' + (28 + rand() * 18) + '%,' + (30 + rand() * 16) + '%,'
+           + (0.10 + rand() * 0.22).toFixed(2) + ')');
+    }
+  }
+
+  // Grit and flint showing through, sparse and low-contrast.
+  for (let i = 0; i < 2400; i++) {
+    const b = stamps[(rand() * stamps.length) | 0];
+    g.fillStyle = 'rgba(' + (128 + rand() * 70 | 0) + ',' + (126 + rand() * 68 | 0) + ',' + (112 + rand() * 62 | 0) + ',0.30)';
+    g.fillRect(toX(b.x), toY(b.z), 1 + rand() * 2, 1 + rand() * 2);
   }
 
   const t = new THREE.CanvasTexture(cv);
