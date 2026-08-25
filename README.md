@@ -52,9 +52,16 @@ positions, normals and `usemtl` with no UVs, so there is not much to read.
 Keys: WASD and SHIFT to move, SPACE to jump, CLICK to strike, `[` `]` to turn
 the camera, `-` `=` to zoom, `P` for perspective instead of the 2:1
 orthographic, `1` `2` `0` for stance, `E` `V` `H` `X` for the one-shot clips,
-`L` for shading, `K` for the three light rigs, `G` for the isometric lattice,
+`L` for shading, `K` to skip three hours, `T` to hold the clock, `G` for the
+isometric lattice,
 `M` and `8` `9` for the wind, `,` `.` to trim the walk pace (`SHIFT` with them
 for run) and `;` `'` for the size of the held weapon.
+
+A day runs in seven minutes. Everything about the light is a function of one
+number — the fraction of the day elapsed — so the sun climbs a tilted arc and
+rises east and sets west, its colour goes from orange at the horizon to warm
+white overhead, and the sky, the fog, the fill and the moon all read off the
+same clock. After dusk the campfire is the brightest thing in the world.
 
 Health and stamina are wired to what the world already does rather than shown
 for decoration: SHIFT spends stamina and drops back to a walk when it is gone,
