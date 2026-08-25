@@ -690,6 +690,25 @@ function groundTexture() {
   g.globalCompositeOperation = 'source-over';
   for (const b of stamps) blob(b.x, b.z, b.rx, b.rz, b.ang, 'rgba(207,204,191,' + b.a.toFixed(3) + ')');
 
+  // Bare earth either side of the chalk. A path does not go from stone to turf
+  // at a line: the tread spills, the grass gives out before the chalk starts,
+  // and there is a margin of scuffed brown between the two. Drawn wide and
+  // faint, and before the turf pass so the grass can grow back over it.
+  for (const pts of TRACKS) {
+    for (const [x, z, ang] of alongPath(pts, 0.34)) {
+      if (rand() > 0.62) continue;
+      const side = rand() < 0.5 ? 1 : -1;
+      const lat = side * TRACK_WIDTH * (0.34 + rand() * 0.72);
+      const hue = 26 + rand() * 20;                     // earth, not orange
+      const sat = 18 + rand() * 16;
+      const lum = 24 + rand() * 16;
+      blob(x + Math.cos(ang + Math.PI / 2) * lat, z + Math.sin(ang + Math.PI / 2) * lat,
+           0.28 + rand() * 0.62, 0.20 + rand() * 0.44, rand() * 3.14,
+           'hsla(' + hue.toFixed(0) + ',' + sat.toFixed(0) + '%,' + lum.toFixed(0) + '%,'
+           + (0.07 + rand() * 0.16).toFixed(2) + ')');
+    }
+  }
+
   // Turf growing back in from both sides, which is what stops the edge reading
   // as an edge at all.
   for (const pts of TRACKS) {
