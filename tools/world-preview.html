@@ -7,7 +7,7 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #8fb6c8;
                font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eef2; }
   canvas { display: block; }
-  #hud, #help {
+  #hud, #help, #perf {
     position: fixed; background: rgba(16, 22, 28, 0.78); padding: 10px 12px;
     border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); pointer-events: none;
     white-space: pre; backdrop-filter: blur(3px);
@@ -27,6 +27,7 @@
     color: #b9c9ab;
   }
   #help { bottom: 12px; left: 12px; color: #b7c7d2; }
+  #perf { bottom: 12px; right: 18px; color: #a9bcc7; text-align: right; }
   #err  { position: fixed; top: 12px; right: 12px; max-width: 40ch; color: #ffb0a0;
           background: rgba(40,12,12,0.85); padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; }
   b { color: #ffd79a; font-weight: normal; }
@@ -36,9 +37,10 @@
 <canvas id="c"></canvas>
 <div id="brand"><span class="name">WALKER</span><span class="sub">BETA · v0.1</span></div>
 <div id="hud">loading…</div>
+<div id="perf">&mdash;</div>
 <div id="help">WASD move   SHIFT run
 [ ] turn camera   - = zoom   P ortho/persp
-1 sword  2 gun  0 unarmed
+1 sword  2 gun  0 unarmed   ; ' weapon size
 CLICK strike   SPACE jump
 E interact   V wave   H take a hit   X die
 L shading   K light   G grid
@@ -544,7 +546,9 @@ function place(obj, x, z, height, yaw = 0) {
 // the same register the Quaternius packs are drawn in.
 function tree(x, z) {
   const g = new THREE.Group();
-  const h = 3.6 + rand() * 2.6;
+  // 3.6-6.2 m read as scrub beside a 1.75 m figure. Half again puts them at
+  // 5.4-9.3, which is a stand of conifers rather than a hedge.
+  const h = 5.4 + rand() * 3.9;
   const trunkH = h * 0.34;
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(h * 0.035, h * 0.055, trunkH, 6),
@@ -625,7 +629,9 @@ for (let i = 0; i < 40; i++) {
 // field. Heights are in metres and are what the props are being asked to be,
 // not what they were modelled as.
 const CAMP = [
-  ['Tent',          -4.2,  -2.6, 2.10,  0.6 ],
+  // Sized against the figure rather than against a spec sheet: a shelter has to
+  // look like something he could get into, and 2.1 m read as a toy beside him.
+  ['Tent',          -5.6,  -3.7, 3.30,  0.6 ],
   ['Bonfire',        0.0,   0.0, 0.55,  0.0 ],
   ['Bonfire_Fire',   0.0,   0.0, 0.95,  0.0 ],
   ['WoodLog',        2.4,  -1.4, 0.34,  1.1 ],
@@ -693,11 +699,15 @@ new GLTFLoader().load('../models/adventurer-m.glb', gltf => {
 // unchanged. `len` is the finished length in metres, which is why the scale
 // below divides out the bone's accumulated world scale rather than trusting the
 // bone frame to be life-sized.
+// The plan's lengths are life-sized: a 0.61 m machete and a 0.22 m pistol are
+// what those things measure. At this camera they read as a twig and a bar of
+// soap, so the weapon is drawn larger than life on purpose — the same licence
+// every isometric game takes with a held item. `;` and `'` trim it live.
 const HELD = {
-  sword: { dir: SURV, of: 'Knife',    len: 0.61, rot: [12, -174, -15], off: [-0.02, 0.16, -0.03] },
-  gun:   { dir: GUNS, of: 'Pistol_1', len: 0.22, rot: [180, 180, -90], off: [-0.02, 0.14, -0.02] },
+  sword: { dir: SURV, of: 'Knife',    len: 0.98, rot: [12, -174, -15], off: [-0.02, 0.16, -0.03] },
+  gun:   { dir: GUNS, of: 'Pistol_1', len: 0.42, rot: [180, 180, -90], off: [-0.02, 0.14, -0.02] },
 };
-let heldGroup = null, heldKind = null, pendingHeld = null;
+let heldGroup = null, heldKind = null, pendingHeld = null, heldTrim = 1.0;
 const heldCache = new Map();
 
 // THREE.JS DELETES THE DOT. PropertyBinding.sanitizeNodeName treats it as a path
@@ -748,7 +758,8 @@ async function setHeld(kind) {
 
   heldGroup = new THREE.Group();
   heldGroup.add(obj);
-  heldGroup.scale.setScalar(s);
+  heldGroup.userData.baseScale = s;
+  heldGroup.scale.setScalar(s * heldTrim);
   heldGroup.rotation.set(...spec.rot.map(THREE.MathUtils.degToRad));
   heldGroup.position.set(spec.off[0], spec.off[1], spec.off[2]);
   bone.add(heldGroup);
@@ -786,6 +797,10 @@ addEventListener('keydown', e => {
     const d = (k === '.' ? 1 : -1) * 0.05;
     if (held.has('shift')) runPace = Math.max(0.3, +(runPace + d).toFixed(2));
     else walkPace = Math.max(0.3, +(walkPace + d).toFixed(2));
+  }
+  if (k === ';' || k === "'") {
+    heldTrim = Math.max(0.3, Math.min(3, +(heldTrim + (k === "'" ? 0.06 : -0.06)).toFixed(2)));
+    if (heldGroup) heldGroup.scale.setScalar(heldGroup.userData.baseScale * heldTrim);
   }
   if (k === '1') { stance = 'sword'; setHeld('sword'); }
   if (k === '2') { stance = 'gun';   setHeld('gun'); }
@@ -887,6 +902,7 @@ let jumpV = 0, airborne = false;
 const vel = new THREE.Vector3();
 let speed = 0;
 const hud = document.getElementById('hud');
+const perf = document.getElementById('perf');
 let last = performance.now();
 let frameNo = 0;
 let fpsAcc = 0, fpsN = 0, fps = 0;
@@ -1001,13 +1017,16 @@ function frame(now) {
 
   hud.textContent =
     'clip     ' + clipName + '  x' + rate.toFixed(2) + '\n' +
-    'speed    ' + speed.toFixed(2) + ' m/s   stance ' + stance + (heldGroup ? ' (held)' : '') + '\n' +
+    'speed    ' + speed.toFixed(2) + ' m/s   stance ' + stance +
+      (heldGroup ? ' (held x' + heldTrim.toFixed(2) + ' = ' + (HELD[heldKind].len * heldTrim).toFixed(2) + 'm)' : '') + '\n' +
     'pace     walk x' + walkPace.toFixed(2) + ' = ' + (REFS.Walk * walkPace).toFixed(2) + '   run x' + runPace.toFixed(2) + ' = ' + (REFS.Run * runPace).toFixed(2) + '\n' +
     'camera   ' + (ortho ? 'ortho ' + ISO_ELEV_DEG + '°' : 'persp') +
       '  azi ' + Math.round(THREE.MathUtils.radToDeg(azi)) % 360 + '°  half-h ' + dist.toFixed(1) + '\n' +
     'light    ' + LIGHTS[lightIdx].name + '   shading ' + SHADING[shading] + '\n' +
-    'fps      ' + fps + '   tris ' + (renderer.info.render.triangles / 1000 | 0) + 'k   calls ' + renderer.info.render.calls + '\n' +
     'model    ' + rawH.toFixed(2) + ' raw -> ' + modelH.toFixed(2) + ' m   props ' + propsLoaded + '/' + CAMP.length;
+
+  perf.textContent = fps + ' fps   ' + (renderer.info.render.triangles / 1000 | 0) + 'k tris   '
+                   + renderer.info.render.calls + ' calls';
 
   requestAnimationFrame(frame);
 }
