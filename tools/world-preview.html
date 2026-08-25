@@ -420,20 +420,34 @@ function groundTexture() {
   g.fillStyle = '#6f8f4e';
   g.fillRect(0, 0, N, N);
 
-  // THIS LAYER LOST ITS JOB. It was carrying all the variation the ground had,
-  // so it was drawn strong — and at half a metre to the pixel the ellipses read
-  // as exactly what they are, a scatter of green discs. The tiled grass now does
-  // the close texture, so all this has to do is vary the tone slowly across the
-  // field: many fewer, much larger, barely there, and staying near the base
-  // hue instead of ranging across the greens.
-  for (let i = 0; i < 260; i++) {
-    const r = (14 + rand() * 34) * P;
-    g.fillStyle = 'hsla(' + (84 + rand() * 14) + ',' + (26 + rand() * 12) + '%,'
-                + (40 + rand() * 14) + '%,0.10)';
+  // PATCHES, NOT DISCS. The variation is wanted — ground is never one green —
+  // but a flat ellipse fill has an edge, and at half a metre to the pixel that
+  // edge is exactly what read as a scatter of green circles. Each patch is a
+  // radial gradient falling to nothing at its rim instead, so there is tone
+  // without an outline anywhere, and the context is scaled before the arc so
+  // they are not all perfect rounds.
+  for (let i = 0; i < 850; i++) {
+    const x = rand() * N, y = rand() * N;
+    const r = (5 + rand() * 24) * P;
+    const hue = 80 + rand() * 20, sat = 24 + rand() * 16, lum = 36 + rand() * 20;
+    const a = 0.10 + rand() * 0.17;
+    const col = (mul) => 'hsla(' + hue + ',' + sat + '%,' + lum + '%,' + (a * mul).toFixed(3) + ')';
+    const grd = g.createRadialGradient(0, 0, 0, 0, 0, r);
+    grd.addColorStop(0.0, col(1));
+    grd.addColorStop(0.45, col(0.62));
+    grd.addColorStop(0.78, col(0.22));
+    grd.addColorStop(1.0, col(0));
+    g.save();
+    g.translate(x, y);
+    g.rotate(rand() * 3.14);
+    g.scale(1, 0.55 + rand() * 0.7);
+    g.fillStyle = grd;
     g.beginPath();
-    g.ellipse(rand() * N, rand() * N, r, r * (0.6 + rand() * 0.7), rand() * 3.14, 0, 6.29);
+    g.arc(0, 0, r, 0, 6.29);
     g.fill();
+    g.restore();
   }
+
   // Grain, kept because it stops the large shapes banding, and taken right down
   // because the detail map covers this scale far better than the canvas can.
   for (let i = 0; i < 26000; i++) {
