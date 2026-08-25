@@ -13,6 +13,19 @@
     white-space: pre; backdrop-filter: blur(3px);
   }
   #hud  { top: 12px; left: 12px; }
+  #brand {
+    position: fixed; top: 14px; right: 18px; text-align: right;
+    pointer-events: none; user-select: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.55);
+  }
+  #brand .name {
+    display: block; font-size: 27px; line-height: 1; letter-spacing: 0.14em;
+    color: #f2f6ee; font-weight: 600;
+  }
+  #brand .sub {
+    display: block; margin-top: 5px; font-size: 10px; letter-spacing: 0.30em;
+    color: #b9c9ab;
+  }
   #help { bottom: 12px; left: 12px; color: #b7c7d2; }
   #err  { position: fixed; top: 12px; right: 12px; max-width: 40ch; color: #ffb0a0;
           background: rgba(40,12,12,0.85); padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; }
@@ -21,6 +34,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="brand"><span class="name">WALKER</span><span class="sub">BETA · v0.1</span></div>
 <div id="hud">loading…</div>
 <div id="help">WASD move   SHIFT run
 [ ] turn camera   - = zoom   P ortho/persp
