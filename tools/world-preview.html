@@ -186,7 +186,8 @@ scene.add(rim);
 // light and the moon all read off the same clock.
 const DAY_SECONDS = 420;                                   // a full cycle
 const SUN_TILT = THREE.MathUtils.degToRad(30);             // how far the arc leans
-let tod = 0.33;                                            // start mid-morning
+// Just before the sun clears the horizon, so the day opens on it coming up.
+let tod = 0.245;                                           // 05:53
 let clockRunning = true;
 
 const moon = new THREE.DirectionalLight(0x9fb6d8, 0);
