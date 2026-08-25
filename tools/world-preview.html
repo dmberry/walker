@@ -989,7 +989,10 @@ function footstep(onChalk, hard) {
   const rnd = (a, b) => a + Math.random() * (b - a);
 
   footFlip = -footFlip;
-  const level = (hard ? 0.050 : 0.030) * rnd(0.68, 1.35);
+  // Chalk sits UNDER turf, not over it. The bright scatter that tells the two
+  // surfaces apart also makes the chalk step carry further, so it needs taking
+  // down rather than levelling up.
+  const level = (hard ? 0.050 : 0.030) * rnd(0.68, 1.35) * (onChalk ? 0.72 : 1);
   const dur = rnd(0.075, 0.155);
   const offset = Math.random() * Math.max(0.01, stepBuf.duration - 0.4);
 
@@ -1012,7 +1015,8 @@ function footstep(onChalk, hard) {
     f.type = type; f.frequency.value = freq; f.Q.value = q;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, t0);
-    env.gain.exponentialRampToValueAtTime(gain, t0 + rnd(0.004, 0.013));
+    // A slower attack takes the click off the front of it.
+    env.gain.exponentialRampToValueAtTime(gain, t0 + rnd(0.010, 0.026));
     env.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
     src.connect(f); f.connect(env); env.connect(out);
     src.start(t0, offset);
@@ -1022,10 +1026,10 @@ function footstep(onChalk, hard) {
   // The weight of it.
   layer('lowpass', rnd(360, 840), rnd(0.6, 1.35), level * rnd(0.7, 1.1), dur);
   // The surface. Chalk and grit scatter; turf barely does.
-  const scuff = level * (onChalk ? rnd(0.35, 0.85) : rnd(0.04, 0.26));
+  const scuff = level * (onChalk ? rnd(0.14, 0.36) : rnd(0.04, 0.22));
   layer(onChalk ? 'bandpass' : 'highpass',
-        onChalk ? rnd(1100, 2700) : rnd(1500, 3400),
-        rnd(0.5, 1.15), scuff, dur * rnd(0.55, 1.1));
+        onChalk ? rnd(620, 1450) : rnd(1500, 3400),
+        rnd(0.4, 0.85), scuff, dur * rnd(0.55, 1.1));
 }
 
 function updateWind(t) {
