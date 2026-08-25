@@ -32,23 +32,27 @@
   #perf { bottom: 12px; right: 18px; color: #9db0bb; text-align: right;
           font-size: 10px; line-height: 1.4; padding: 6px 9px; }
   #perf b { color: #e6dcc4; font-weight: normal; }
+  /* Kept quiet on purpose. At night the world drops to almost nothing and a
+     saturated bar with a hard border is then the brightest thing on screen —
+     which is exactly backwards, since it is the least important. Thin, muted,
+     no border, and it fades further when both bars are full and there is
+     nothing to say. */
   #vitals {
-    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
-    background: rgba(16, 22, 28, 0.78); border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 6px; padding: 9px 12px; backdrop-filter: blur(3px);
-    pointer-events: none; user-select: none; min-width: 236px;
+    position: fixed; bottom: 13px; left: 50%; transform: translateX(-50%);
+    background: rgba(12, 17, 22, 0.38); border-radius: 5px; padding: 7px 11px;
+    backdrop-filter: blur(2px); pointer-events: none; user-select: none;
+    min-width: 186px; opacity: 0.55; transition: opacity 400ms ease;
   }
-  #vitals .row { display: flex; align-items: center; gap: 8px; }
-  #vitals .row + .row { margin-top: 6px; }
-  #vitals .tag { width: 26px; font-size: 10px; letter-spacing: 0.16em; color: #93a5b0; }
+  #vitals.astir { opacity: 0.92; }
+  #vitals .row { display: flex; align-items: center; gap: 7px; }
+  #vitals .row + .row { margin-top: 4px; }
+  #vitals .tag { width: 22px; font-size: 8px; letter-spacing: 0.14em; color: #7e8d96; }
   #vitals .bar {
-    flex: 1; height: 9px; background: rgba(0,0,0,0.45);
-    border: 1px solid rgba(255,255,255,0.14); border-radius: 2px; overflow: hidden;
+    flex: 1; height: 4px; background: rgba(255, 255, 255, 0.09);
+    border-radius: 2px; overflow: hidden;
   }
-  /* No transition here: it is set every frame, and a colour animation that
-     never finishes leaves the fill part-way to transparent. */
-  #vitals .bar i { display: block; height: 100%; width: 100%; background: #6fbf5a; }
-  #vitals .num { width: 26px; text-align: right; font-size: 10px; color: #c6d2da; }
+  #vitals .bar i { display: block; height: 100%; width: 100%; background: #7d9a63; }
+  #vitals .num { width: 20px; text-align: right; font-size: 8px; color: #8c9aa2; }
   #err  { position: fixed; top: 12px; right: 12px; max-width: 40ch; color: #ffb0a0;
           background: rgba(40,12,12,0.85); padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; }
   b { color: #ffd79a; font-weight: normal; }
@@ -915,9 +919,19 @@ function loadNature(name) {
         o.castShadow = !isStone;          // a flag set in the ground casts none
         o.receiveShadow = true;
         if (isStone) {
-          o.material.color.setHex(0xa9a79c);
-          o.material.emissive = new THREE.Color(0x53514a);
-          o.material.emissiveIntensity = 0.55;
+          // NOT EMISSIVE. The first attempt lifted the dark mossy rim with an
+          // emissive term, which works in daylight and is wrong: emissive is
+          // light GIVEN OFF, so once the world went dark the stones went on
+          // shining and the path glowed. What was wanted was less contrast
+          // WITHIN the texture, which is a different thing entirely — pull the
+          // texture toward a mid stone grey and let the scene light it like
+          // everything else.
+          o.material.color.setHex(0xc3c0b6);
+          o.material.onBeforeCompile = (sh) => {
+            sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
+              '#include <map_fragment>\n'
+              + '\tdiffuseColor.rgb = mix(vec3(0.60, 0.58, 0.54), diffuseColor.rgb, 0.5);');
+          };
         }
         // Leaf cards are cut out of their texture, so the depth pass has to
         // honour the cut or the shadows arrive as solid rectangles.
@@ -1518,6 +1532,7 @@ const hud = document.getElementById('hud');
 const perf = document.getElementById('perf');
 const hpFill = document.getElementById('hpFill'), stFill = document.getElementById('stFill');
 const hpNum = document.getElementById('hpNum'), stNum = document.getElementById('stNum');
+const vitals = document.getElementById('vitals');
 let last = performance.now();
 let frameNo = 0;
 let fpsAcc = 0, fpsN = 0, fps = 0;
@@ -1671,10 +1686,12 @@ function frame(now) {
 
   hpFill.style.width = health.toFixed(1) + '%';
   stFill.style.width = stamina.toFixed(1) + '%';
-  hpFill.style.backgroundColor = health > 55 ? '#6fbf5a' : health > 25 ? '#e0a63a' : '#d6503c';
-  stFill.style.backgroundColor = stamina > 12 ? '#c8a34a' : '#8a6f33';
+  hpFill.style.backgroundColor = health > 55 ? '#7d9a63' : health > 25 ? '#a88449' : '#9c5449';
+  stFill.style.backgroundColor = winded ? '#6d6144' : '#918a5e';
   hpNum.textContent = Math.round(health);
   stNum.textContent = Math.round(stamina);
+  // Brighten only when either bar has something to report.
+  vitals.classList.toggle('astir', health < 99.5 || stamina < 99.5 || dead);
 
   if (clockRunning) {
     tod = (tod + dt / DAY_LENGTHS[dayIdx]) % 1;
