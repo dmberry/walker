@@ -8,10 +8,14 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #8fb6c8;
                font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eef2; }
   canvas { display: block; }
+  /* Kept well back. These sit over the world, not in front of it, so the panel
+     is mostly blur and the text carries its own shadow rather than needing a
+     slab behind it to be readable. */
   #hud, #help, #perf {
-    position: fixed; background: rgba(16, 22, 28, 0.78); padding: 10px 12px;
-    border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); pointer-events: none;
-    white-space: pre; backdrop-filter: blur(3px);
+    position: fixed; background: rgba(13, 18, 24, 0.34); padding: 10px 12px;
+    border-radius: 6px; border: 1px solid rgba(255,255,255,0.06); pointer-events: none;
+    white-space: pre; backdrop-filter: blur(6px);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
   }
   #hud  { top: 12px; left: 12px; font-size: 10px; line-height: 1.45; padding: 7px 9px; }
   #brand {
@@ -39,11 +43,11 @@
      nothing to say. */
   #vitals {
     position: fixed; bottom: 13px; left: 50%; transform: translateX(-50%);
-    background: rgba(12, 17, 22, 0.38); border-radius: 5px; padding: 7px 11px;
-    backdrop-filter: blur(2px); pointer-events: none; user-select: none;
-    min-width: 186px; opacity: 0.55; transition: opacity 400ms ease;
+    background: rgba(13, 18, 24, 0.24); border-radius: 5px; padding: 7px 11px;
+    backdrop-filter: blur(5px); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); pointer-events: none; user-select: none;
+    min-width: 186px; opacity: 0.55;
   }
-  #vitals.astir { opacity: 0.92; }
+
   #vitals .row { display: flex; align-items: center; gap: 7px; }
   #vitals .row + .row { margin-top: 4px; }
   #vitals .tag { width: 22px; font-size: 8px; letter-spacing: 0.14em; color: #7e8d96; }
@@ -196,6 +200,7 @@ let dayIdx = 0;
 const SUN_TILT = THREE.MathUtils.degToRad(30);             // how far the arc leans
 // Just before the sun clears the horizon, so the day opens on it coming up.
 let tod = 0.245;                                           // 05:53
+let daylight = 0;      // 0 at night, 1 in full day; the readouts follow it too
 let clockRunning = true;
 
 const moon = new THREE.DirectionalLight(0x9fb6d8, 0);
@@ -221,6 +226,7 @@ function applyLight() {
   const dir = sunAt(tod);
   const up = Math.max(0, dir.y);                  // 0 at the horizon, 1 overhead
   const day = Math.min(1, up * 3.2);              // full daylight well before noon
+  daylight = day;
   // How much of the sky is dawn or dusk: high only while the sun is near the
   // horizon, and nothing at all once it is properly down.
   const low = Math.max(0, 1 - Math.abs(dir.y) * 6) * (dir.y > -0.12 ? 1 : 0);
@@ -882,7 +888,10 @@ async function loadProp(name, dir = PROP_DIR) {
 // came out at 3.18 m, because the box takes in its guy ropes, and he could not
 // get within a stride and a half of it. Anything not named here is scenery you
 // walk over.
-const SOLID = { Tent: 1.15, Bonfire: 0.5, PropaneTank: 0.26, WoodLog: 0.28 };
+// WoodLog is gone from here: at 0.34 m it is under the step height and the rule
+// above drops it anyway, but there is no point naming something as solid that
+// then is not.
+const SOLID = { Tent: 1.15, Bonfire: 0.5, PropaneTank: 0.26 };
 
 function place(obj, x, z, height, yaw = 0, solid = 0) {
   const box = new THREE.Box3().setFromObject(obj);
@@ -893,7 +902,8 @@ function place(obj, x, z, height, yaw = 0, solid = 0) {
   obj.position.set(x, heightAt(x, z) - box.min.y * s, z);
   obj.rotation.y = yaw;
   scene.add(obj);
-  if (solid) blockers.push({ x, z, r: solid, top: obj.position.y + size.y * s });
+  const top = obj.position.y + size.y * s;
+  if (solid && top - heightAt(x, z) >= STEP_UP) blockers.push({ x, z, r: solid, top });
   return obj;
 }
 
@@ -987,10 +997,17 @@ function plant(src, x, z, target, yaw, opts = {}) {
   // guy ropes and overhanging branches, and a blocker drawn round those stops
   // him a stride short of everything.
   const top = obj.position.y + size.y * s;
-  if (opts.solid === 'footprint') {
-    blockers.push({ x, z, r: Math.min(Math.min(size.x, size.z) * s * 0.45, 1.1), top });
-  } else if (typeof opts.solid === 'number') {
-    blockers.push({ x, z, r: opts.solid, top });
+  // ANYTHING SHORTER THAN A STEP IS NOT AN OBSTACLE. He already walks up 0.45 m
+  // of hillside without breaking stride, so a log or a stone below that height
+  // has no business stopping him — and deciding it by the same number the
+  // terrain uses means there is no list to keep in agreement with itself.
+  const stands = top - heightAt(x, z);
+  if (stands >= STEP_UP) {
+    if (opts.solid === 'footprint') {
+      blockers.push({ x, z, r: Math.min(Math.min(size.x, size.z) * s * 0.45, 1.1), top });
+    } else if (typeof opts.solid === 'number') {
+      blockers.push({ x, z, r: opts.solid, top });
+    }
   }
   return obj;
 }
@@ -1709,8 +1726,11 @@ function frame(now) {
   stFill.style.backgroundColor = winded ? '#6d6144' : '#918a5e';
   hpNum.textContent = Math.round(health);
   stNum.textContent = Math.round(stamina);
-  // Brighten only when either bar has something to report.
-  vitals.classList.toggle('astir', health < 99.5 || stamina < 99.5 || dead);
+  // A fixed opacity cannot suit both ends of the day: what recedes properly
+  // against a dark field disappears against a lit one. It tracks the same
+  // daylight the sun does, and lifts again whenever a bar has something to say.
+  const astir = health < 99.5 || stamina < 99.5 || dead;
+  vitals.style.opacity = ((astir ? 0.78 : 0.42) + daylight * (astir ? 0.22 : 0.42)).toFixed(2);
 
   if (clockRunning) {
     tod = (tod + dt / DAY_LENGTHS[dayIdx]) % 1;
