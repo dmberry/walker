@@ -2308,8 +2308,14 @@ function buildDatacentre() {
   {
     const rowTop = heightAt(DC.x, DC.z) + base + 2.35;
     for (const r of runs) {
+      // DEEP ENOUGH THAT HIS FEET STAY OUT. At 1.06 the blocker edge sat a
+      // centimetre past the cabinet face, so the capsule could stand with its
+      // centre 0.36 m from the face — and an idle stance puts the leading foot
+      // 0.4 m past the centre, through the face plane, which then sliced the
+      // leg. The occlusion was correct; the standing room was not. 1.45 keeps
+      // the whole stance clear of the face with a boot's length to spare.
       blockers.push({ x: DC.x + (r.x0 + r.x1) / 2, z: DC.z + r.z,
-                      hw: (r.x1 - r.x0) / 2, hd: 1.06, top: rowTop });
+                      hw: (r.x1 - r.x0) / 2, hd: 1.45, top: rowTop });
     }
   }
   racks.instanceMatrix.needsUpdate = true;
@@ -3261,6 +3267,15 @@ function openTerm() {
   termActive = true;
   terminal.reopen();
   held.clear();                       // or you walk on after letting go
+  // STRAIGHTEN HIM UP. Opening mid-stride left whatever pose the walk was in —
+  // and a swing leg reaches half a metre past the capsule, far enough to poke
+  // through the rack face and be sliced by it. Using a terminal means standing
+  // at it: he steps to the mark, faces the screen, and stands.
+  pos.x = termSpot.x;
+  pos.z = termSpot.z;
+  vel.set(0, 0, 0);
+  if (root) root.rotation.y = Math.PI;          // atan2(0, -1): facing north
+  if (mixer) play('Idle', false, 0.12);
   termPanel.classList.add('open');
   termHint.classList.remove('on');
   terminal.draw();

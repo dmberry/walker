@@ -283,6 +283,15 @@ test('the sliding leaves cast no shadow', () => {
     'if the shadow map updates every frame this guard is moot — and the cost is back');
 });
 
+test('the rack blockers hold a standing pose clear of the face', () => {
+  // At hd 1.06 the capsule could stand 0.36 m from the face plane, and an idle
+  // stance puts the leading foot 0.4 m past the capsule centre — through the
+  // plane, which sliced the leg. The face sits 1.05 from the row centre; the
+  // blocker must hold the centre a stride's reach beyond that.
+  const hd = num(GAME, /hw: \(r\.x1 - r\.x0\) \/ 2, hd: ([\d.]+)/, 'the row blocker depth');
+  assert.ok(hd >= 1.4, `row blocker hd ${hd}: feet reach the face plane again`);
+});
+
 // ---- the rack faces ---------------------------------------------------------
 
 test('there is more than one cabinet in the hall', () => {
