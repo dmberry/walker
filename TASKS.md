@@ -84,6 +84,20 @@ actually loaded get copied out of `_tmp/`.
 
 ## Done
 
+- [x] **W-20** 2026-08-26 **The texture bug under all the others.** `siteTex`
+      hands back a texture built on an 8x8 placeholder so callers get something
+      synchronously, then resizes the canvas when the image lands. Flagging
+      `needsUpdate` re-uploads level 0 into storage allocated for the
+      placeholder and leaves the mip chain above it dead. Only a texture that
+      minifies hard enough reaches those levels — the apron does, at a repeat of
+      82 by 45, and rendered pure `0,0,0` at midday with a white base colour and
+      a canvas measuring 186 of 255. The wall was dimmed by the same fault and
+      merely looked like dark concrete, which is what sent three earlier
+      attempts off chasing albedo. `dispose()` before `needsUpdate` fixes both:
+      apron 0 → 177, wall 96 → 130 and far more even. All the shader lifts are
+      gone; `siteTex`'s load-time gain is the only control.
+      Walk pace 1.45 → 1.62 (5.16 → 5.77 m/s) on top.
+
 - [x] **W-08b** 2026-08-26 **The door glitch, properly.** Not z-fighting.
       `shadowMap.autoUpdate` is off, so the map is baked on demand — and the
       doors are the only thing outside that moves every frame, so their shadows

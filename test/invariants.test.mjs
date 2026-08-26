@@ -146,24 +146,68 @@ test('lights are switched with visible, not with intensity', () => {
     + 'fragment whether it contributes or not');
 });
 
-test('the wall map is lifted off its own black floor, grain intact', () => {
-  // concrete.jpg averages 71 of 255, which is 0.06 once decoded to linear. A
-  // surface returning six per cent is charcoal, and no amount of light makes it
-  // read as concrete. But the first fix blended toward a flat grey, which lifts
-  // the mean and discards the grain in the same stroke — the wall came out as
-  // painted card. Gain and offset raise it and widen the variation instead.
-  const m = grab(GAME, /diffuseColor\.rgb = diffuseColor\.rgb \* ([\d.]+) \+ ([\d.]+);/,
-                 'the wall map lift');
-  const [gain, offset] = [Number(m[1]), Number(m[2])];
-  const mean = 0.06 * gain + offset;
-  assert.ok(mean > 0.15 && mean < 0.45,
-    `lifted mean is ${mean.toFixed(3)} linear; concrete returns 0.2 to 0.4`);
-  assert.ok(gain > 1.2, 'a gain at or under 1 flattens the grain rather than lifting it');
-  assert.ok(0.20 * gain + offset < 1, 'the brightest texels clip');
-  // Scoped to the wall's own constant: the path stones use a mix on purpose,
-  // and for a different reason — there the goal really is less contrast.
+test('a resized texture canvas is disposed before it is re-uploaded', () => {
+  // THE BUG UNDER ALL THE OTHERS. siteTex hands back a texture built against an
+  // 8x8 placeholder so callers get something synchronously, then resizes the
+  // canvas when the image lands. Flagging needsUpdate re-uploads level 0 into
+  // storage allocated for the placeholder and leaves the mip chain above it
+  // dead — which only shows where a texture minifies hard enough to reach those
+  // levels. The apron does: 2.4 m slabs over 198 m is a repeat of 82 by 45, and
+  // it rendered pure 0,0,0 at full midday with the sun's shadow disabled, a
+  // white base colour and a canvas measuring 186 of 255. The wall was dimmed by
+  // the same fault and merely looked like dark concrete, which is what sent the
+  // first three attempts off after albedo instead.
+  // Scoped to siteTex: the ground detail map has its own onload earlier in the
+  // file and matching that one would test nothing.
+  const fn = grab(GAME, /const siteTex = [\s\S]*?\n\};/, 'siteTex')[0];
+  const onload = grab(fn, /img\.onload = \(\) => \{[\s\S]*?\n  \};/, "siteTex's onload")[0];
+  assert.match(onload, /\.dispose\(\)/,
+    'the texture must be disposed after the canvas resizes, or its mip chain '
+    + 'stays as it was built for the 8x8 placeholder');
+  // Comments first, again: the explanation above the fix names needsUpdate
+  // several lines before the code reaches it. Third time this has caught me out
+  // in this file — hash2's warning about `>>` contained a `>>`, and the texture
+  // guard tripped on filenames in prose.
+  const code = onload.replace(/\/\/[^\n]*/g, '');
+  assert.ok(code.indexOf('dispose()') < code.indexOf('needsUpdate'),
+    'dispose has to come before needsUpdate');
+});
+
+test('site texture level is set once, at load, and never stacked', () => {
+  // Each texture is drawn through a canvas filter at load. Nothing may lift a
+  // map a second time in a shader: x2.6 on top of the x1.85 already applied
+  // pushed most of the range past 1.0 and everything clipped to flat colour.
+  const gains = [...GAME.matchAll(/siteTex\('([^']+)',\s*([\d.]+)/g)]
+    .map(m => [m[1], Number(m[2])]);
+  assert.ok(gains.length >= 3, 'siteTex calls have moved; this guard is blind');
+  for (const [file, gain] of gains) {
+    assert.ok(gain >= 1 && gain <= 3, `${file} loads at brightness(${gain})`);
+  }
+  assert.ok(!/diffuseColor\.rgb = diffuseColor\.rgb \* [\d.]+ \+/.test(GAME),
+    'a shader gain is stacked on a texture siteTex has already lifted; it clips');
   assert.ok(!/mix\(vec3\(0\.34, 0\.34, 0\.33\)/.test(GAME),
     'the old blend-toward-grey is back on the wall; it flattens the texture');
+});
+
+test('the tiled site textures go through the one loader', () => {
+  // slab.jpg used to be built by a near-identical copy of siteTex: two functions
+  // to keep in step, and a texture outside the clone family, so a siteClone of
+  // it would have come back blank and never repainted.
+  //
+  // floor.jpg and hazard.jpg are not in scope: the first is composited into a
+  // tiled canvas and the second is drawn under sign lettering, so both do want
+  // their own loader. What must go through siteTex is anything used as a tiling
+  // map with a level to set — which is concrete and slab.
+  // Comments name these files while explaining the history, so the comments go
+  // first — the same trap as the `>>` in hash2's own warning about `>>`.
+  const code = GAME.replace(/^\s*\/\/[^\n]*$/gm, '');
+  for (const file of ['concrete.jpg', 'slab.jpg']) {
+    const at = code.indexOf(file);
+    assert.ok(at >= 0, `${file} is no longer loaded at all`);
+    const line = code.slice(code.lastIndexOf('\n', at) + 1, code.indexOf('\n', at));
+    assert.match(line, /siteTex\(/, `${file} does not go through siteTex: ${line.trim()}`);
+    assert.equal(code.indexOf(file, at + 1), -1, `${file} is loaded in more than one place`);
+  }
 });
 
 // ---- movement ---------------------------------------------------------------
@@ -209,6 +253,24 @@ test('the doorway is derived from the leaf, so the model is never stretched', ()
   const openW = 2 * w * scale;
   assert.ok(openW > 4, `a ${openW.toFixed(2)} m bay is too narrow for a hall this size`);
   assert.match(GAME, /m\.scale\.setScalar\(DOOR_SCALE\)/, 'the leaf must scale uniformly');
+});
+
+test('nothing in the doorway shares a plane with anything else', () => {
+  // Three coplanar pairs caused the barcode striping at the door, one per axis,
+  // and each was found only after the previous one was fixed. The frame laps the
+  // opening rather than butting against it, and the leaves run clear in front.
+  const lap = num(GAME, /const DOOR_LAP = ([\d.]+)/, 'DOOR_LAP');
+  assert.ok(lap > 0.02,
+    'without a lap the jamb\'s inner face and the lintel\'s underside sit exactly '
+    + 'on the wall\'s own faces, and the depth buffer cannot separate them');
+
+  assert.match(GAME, /const FRAME_Z = D \/ 2 \+ 0\.34 \+ JAMB_D \/ 2/,
+    'the front of the frame must be computed, not guessed at');
+  const m = grab(GAME, /leaf\.position\.set\([^,]+,\s*base,\s*FRAME_Z \+ ([\d.]+)\)/,
+                 'the leaf standoff');
+  assert.ok(Number(m[1]) > 0,
+    'the leaf must sit in front of the frame; at any smaller offset it slides '
+    + 'through the jamb as it opens');
 });
 
 test('the sliding leaves cast no shadow', () => {

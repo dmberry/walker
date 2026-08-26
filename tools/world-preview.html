@@ -352,7 +352,7 @@ let stepPhase = 0;
 // pace is the playback rate, the body travels at the clip's own measured speed
 // times that rate, and a planted foot is planted by construction rather than by
 // the references happening to be right.
-let walkPace = 1.45;
+let walkPace = 1.62;
 let runPace  = 1.65;
 // Rate scaling keeps the feet planted at any speed — stride length is fixed and
 // only the cycle time moves — so these bounds are about when it stops LOOKING
@@ -1643,7 +1643,18 @@ const siteTex = (file, gain = 1.0, sat = 1.0) => {
     const c = cv.getContext('2d');
     c.filter = 'brightness(' + gain + ') saturate(' + sat + ')';
     c.drawImage(img, 0, 0);
-    for (const t of family) t.needsUpdate = true;
+    // DISPOSE, THEN FLAG. The texture is created against an 8x8 placeholder so
+    // callers get something synchronously, and the canvas is resized here when
+    // the image arrives. needsUpdate alone re-uploads level 0 into GPU storage
+    // that was allocated for the placeholder, and the mip chain above it stays
+    // as it was — which only shows up where a texture minifies hard enough to
+    // reach those levels. The apron does: 2.4 m slabs over 198 m is a repeat of
+    // 82 by 45, so it sampled the dead mips and came out pure black, while the
+    // wall at a repeat of 16 by 3 looked fine and hid the bug.
+    //
+    // dispose() drops the GPU texture entirely, so the next render builds a new
+    // one at the right size with a correct chain.
+    for (const t of family) { t.dispose(); t.needsUpdate = true; }
   };
   img.src = '../assets/site/' + file;
   return base;
@@ -1661,27 +1672,13 @@ const siteClone = (tex) => {
 const TEX_CONCRETE = siteTex('concrete.jpg', 1.85, 0.85);
 const TEX_HAZARD = siteTex('hazard.jpg', 1.15, 0.9);
 
-const TEX_SLAB = (() => {
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = 8;
-  const t = new THREE.CanvasTexture(cv);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  const img = new Image();
-  img.onload = () => {
-    cv.width = img.naturalWidth;
-    cv.height = img.naturalHeight;
-    const c = cv.getContext('2d');
-    // Source mean is 103; this lands it near 190, which reads as poured
-    // concrete in daylight rather than the wet grey it was photographed as.
-    c.filter = 'brightness(1.9) saturate(0.8)';
-    c.drawImage(img, 0, 0);
-    t.needsUpdate = true;
-  };
-  img.src = '../assets/site/slab.jpg';
-  return t;
-})();
+// ONE PLACE SETS THE LEVEL, AND IT IS THIS ONE. slab.jpg was built by a
+// near-identical copy of siteTex above, which meant two functions to keep in
+// step and a texture that was not in the clone family — a siteClone of it would
+// have come back blank and never repainted. Source mean is 103; 1.9 lands it
+// near 190, which reads as poured concrete in daylight rather than the wet grey
+// it was photographed as.
+const TEX_SLAB = siteTex('slab.jpg', 1.9, 0.8);
 
 // A hall you can walk into. The shell is built as separate walls and a roof
 // rather than one box, because the roof has to come off when you are inside and
@@ -1730,43 +1727,25 @@ function buildDatacentre() {
   const footY = heightAt(DC.x, DC.z) + base;
   const FLOOD_H = 7.5;          // how far up the wall the wash reaches
 
-  // A SURFACE THAT RETURNS SIX PER CENT IS BLACK WHATEVER YOU SHINE AT IT. The
-  // site textures were authored dark: concrete.jpg averages 71 of 255 and
-  // slab.jpg 98, which decode to 0.06 and 0.13 linear. Real concrete returns
-  // 0.2 to 0.4 and paving about 0.3. So the black elevations and the black
-  // apron were never badly lit — they were correctly lit and nearly perfectly
-  // absorbent, and every attempt to fix them by adding light was pushing on the
-  // wrong end of the equation.
+  // THE TEXTURES ARE ALREADY LIFTED, AT LOAD, BY siteTex. That is the whole of
+  // it, and there is nothing to do here.
   //
-  // The textures are not repainted: they are used elsewhere, and the grain is
-  // the point. Each is pulled toward a mid grey in the shader and keeps some of
-  // its own variation. Same trick as the path stones, for the same reason —
-  // what is wanted is less contrast WITHIN the texture, not more light on it.
-  // GAIN AND OFFSET, NOT A MIX TOWARDS GREY. The first version blended the map
-  // toward a flat colour, which does lift the mean and also throws away the
-  // grain in proportion — at 45 per cent kept, on a texture whose whole range is
-  // 0.0002 to 0.2 linear, the wall came out as painted card and the apron as
-  // flat grey. Multiplying keeps every relative difference and widens it:
+  // Worth recording why this comment exists. The elevations really were black,
+  // and measuring concrete.jpg gave a mean of 71 of 255 — 0.06 in linear, which
+  // is charcoal, and a surface returning six per cent is black whatever you
+  // shine at it. That reading was of the FILE. The game never uses the file: it
+  // draws it through a canvas at brightness(1.85) first, so the texture in play
+  // sits nearer 0.22, which is where concrete belongs.
   //
-  //   concrete  mean 0.06 -> 0.21, range 0.05..0.55   (gain 2.6, offset 0.05)
-  //   slab      mean 0.13 -> 0.29, range 0.04..0.51   (gain 1.9, offset 0.04)
+  // So the diagnosis was measured on the wrong artefact, and the fix — a second
+  // lift in the shader, x2.6 on top of the x1.85 already applied — pushed most
+  // of the range past 1.0. Everything clipped to the same value, which is why
+  // the wall and the apron came out as flat colour with no grain at all. The
+  // black elevations were the key-to-fill ratio and the sky being switched off
+  // indoors, both of which were fixed separately and both of which held.
   //
-  // which is where concrete and paving actually sit, with more visible grain
-  // than the source had rather than less.
-  const lifted = (mat, gain, offset, grey = false) => {
-    mat.onBeforeCompile = (sh) => {
-      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
-          '#include <map_fragment>\n'
-        + (grey
-            // The kit's atlases carry red and orange trim, which reads as a
-            // spaceship on the side of a datacentre. Straight to luminance.
-            ? '\tdiffuseColor.rgb = vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));\n'
-            : '')
-        + '\tdiffuseColor.rgb = diffuseColor.rgb * ' + gain.toFixed(2)
-        + ' + ' + offset.toFixed(3) + ';');
-    };
-    return mat;
-  };
+  // If a site texture needs to be lighter, change its gain in siteTex. One
+  // number, one place, and it cannot stack with itself.
 
   const floodlit = (mat) => {
     // Warm, and dim: this is a wash on concrete, not a lamp pointed at camera.
@@ -1778,9 +1757,6 @@ function buildDatacentre() {
         '#include <begin_vertex>\n\tvWallY = (modelMatrix * vec4(transformed, 1.0)).y;');
       sh.fragmentShader = 'uniform float uUp;\nvarying float vWallY;\n'
         + sh.fragmentShader
-          .replace('#include <map_fragment>',
-            '#include <map_fragment>\n'
-          + '\tdiffuseColor.rgb = diffuseColor.rgb * 2.60 + 0.050;')
           .replace('#include <emissivemap_fragment>',
             '#include <emissivemap_fragment>\n'
           + '\tfloat wash = exp(-max(0.0, vWallY - ' + footY.toFixed(2) + ') / '
@@ -1810,14 +1786,9 @@ function buildDatacentre() {
   // ---- the apron, in real paving slabs --------------------------------------
   {
     TEX_SLAB.repeat.set((W + 30) / 2.4, (D + 30) / 2.4);
-    // AND THE APRON HAS THE SAME PROBLEM THE WALL HAD. slab.jpg averages 98 of
-    // 255, which is 0.13 in linear — better than concrete's 0.06 and still far
-    // under the 0.3 paving actually returns. In open sun it passed; under the
-    // roof's own shadow, which reaches most of the way to the fence when the sun
-    // is high, 0.13 times the fill is black. Same lift, same reason.
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(W + 30, 0.35, D + 30),
-      lifted(new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }), 1.90, 0.040));
+      new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }));
     put(m, 0, 0.17, 0, false);
   }
 
@@ -1892,16 +1863,32 @@ function buildDatacentre() {
   put(box(DOOR_W, H - DOOR_H, T, wallCol, 5), 0, base + DOOR_H + (H - DOOR_H) / 2, D / 2, false, dcNear);
   // A frame around the opening, so it reads as a door and not as damage.
   //
-  // PROUD OF THE WALL, NOT IN IT. At z = D/2 the jambs were exactly coplanar
-  // with the wall segments beside them and the two surfaces fought for the
-  // depth buffer — which is the striping down the left post. Moved forward and
-  // made shallower so no two faces share a plane.
+  // THE FRAME LAPS THE OPENING. Moving the jambs forward in z last time fixed
+  // one shared plane and left two more, because a box has faces on three axes
+  // and only the z pair had been dealt with:
+  //
+  //   the jamb's INNER face sat at x = ±DOOR_W/2, exactly where the wall
+  //   segment beside it ends — coplanar, and that is the barcode down the post;
+  //
+  //   the lintel's UNDERSIDE sat at y = base + DOOR_H, exactly where the wall
+  //   above the door begins — coplanar, and that is the striping across the head.
+  //
+  // A real frame is not butted against the opening, it laps over it, so the
+  // frame pieces now overhang the reveal by DOOR_LAP on each edge. Nothing
+  // shares a plane with anything, and it reads as a door stop, which is what it
+  // would be.
+  const DOOR_LAP = 0.08;
+  const JAMB_D = T * 0.8;
   for (const sgn of [-1, 1]) {
-    put(box(0.42, DOOR_H + 0.6, T * 0.8, 0x5d6167, 0),
-        sgn * (DOOR_W / 2 + 0.21), base + (DOOR_H + 0.6) / 2, D / 2 + 0.34, false, dcNear);
+    put(box(0.42, DOOR_H + 0.6, JAMB_D, 0x5d6167, 0),
+        sgn * (DOOR_W / 2 + 0.21 - DOOR_LAP), base + (DOOR_H + 0.6) / 2,
+        D / 2 + 0.34, false, dcNear);
   }
-  put(box(DOOR_W + 1.3, 0.42, T * 0.8, 0x5d6167, 0),
-      0, base + DOOR_H + 0.21, D / 2 + 0.34, false, dcNear);
+  put(box(DOOR_W + 1.3, 0.42, JAMB_D, 0x5d6167, 0),
+      0, base + DOOR_H + 0.21 - DOOR_LAP, D / 2 + 0.34, false, dcNear);
+
+  // Where the front of the frame ends. The leaves have to clear it.
+  const FRAME_Z = D / 2 + 0.34 + JAMB_D / 2;
 
   // ---- doors that open ------------------------------------------------------
   // Two leaves that part as you come up to them. They carry no collision of
@@ -1947,12 +1934,13 @@ function buildDatacentre() {
       m.scale.setScalar(DOOR_SCALE);
       m.position.multiplyScalar(DOOR_SCALE);
       leaf.add(m);
-      // PROUD OF THE WALL, NOT INSIDE IT. At +0.12 the leaf sat within the
-      // wall's own half-thickness of 0.45, so as it slid open it travelled
-      // through the slab beside the doorway with its face all but coplanar —
-      // which is the flicker you get walking up to it. Industrial doors of this
-      // size run on the outside face anyway.
-      leaf.position.set(sgn * DOOR_W / 4, base, D / 2 + T / 2 + 0.14);
+      // IN FRONT OF THE FRAME, NOT THROUGH IT. At +0.12 the leaf sat inside the
+      // wall's own half-thickness; moved to +0.59 it cleared the wall and ran
+      // straight through the jamb instead, which stands proud to +0.70 — so
+      // sliding open drove the panel through the post, and that intersection is
+      // the rest of the striping. It runs on the outside of the whole frame now,
+      // which is where a door this size runs anyway.
+      leaf.position.set(sgn * DOOR_W / 4, base, FRAME_Z + 0.09);
       dcNear.add(leaf);
       doorLeaves.push({ mesh: leaf, home: sgn * DOOR_W / 4, sgn });
     }
@@ -3624,6 +3612,7 @@ function frame(now) {
   target.lerp(new THREE.Vector3(pos.x, pos.y + 1.0, pos.z), Math.min(1, dt * 7));
   aim();
   renderer.render(scene, cam());
+
 
   hud.textContent =
     'clip     ' + clipName + '  x' + rate.toFixed(2) + '\n' +
