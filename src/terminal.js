@@ -20,6 +20,7 @@
 
 import * as CB from './console-buffer.js';
 import * as U from './unix.js';
+import NCDS from './os-ncds.js';
 
 // FEWER, LARGER CHARACTERS. At 78 columns the glyphs on the screen in the hall
 // were under a pixel across and the whole thing read as a black rectangle. 56
@@ -28,15 +29,17 @@ import * as U from './unix.js';
 export const COLS = 56;
 export const ROWS = 20;
 
-const HOST = 'ncds-hal-01';
-
 export function createTerminal(opts = {}) {
+  // The OS is a parameter: different datacentres run different flavours, and
+  // the terminal reads everything site-specific — host, user, greeting, disk —
+  // off the machine it is showing.
+  const os = opts.os || NCDS;
   const cx = CB.newConsole({ prompt: '$', cols: COLS });
-  const env = U.newShell(opts.clock || (() => '00:00'));
+  const env = U.newShell(opts.clock || (() => '00:00'), os);
   let closed = false;
 
   const setPrompt = () =>
-    CB.setPrompt(cx, `guest@${HOST}:${U.pathString(env.cwd) || '/'}$`);
+    CB.setPrompt(cx, `${os.user}@${os.host}:${U.pathString(env.cwd) || '/'}$`);
 
   // Commands that act on the screen or on the world rather than on the disk.
   // unix.js takes these as hooks so it never has to know either exists.
@@ -54,7 +57,7 @@ export function createTerminal(opts = {}) {
   }
 
   setPrompt();
-  CB.print(cx, U.MOTD, '');
+  CB.print(cx, os.motd, '');
 
   // ------------------------------------------------------------- the picture --
   const canvas = document.createElement('canvas');

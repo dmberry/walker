@@ -4,8 +4,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as U from '../src/unix.js';
+import NCDS from '../src/os-ncds.js';
 
-const shell = () => U.newShell(() => '09:30');
+const shell = () => U.newShell(() => '09:30', NCDS);
 const run = (env, line) => U.runShell(line, env);
 const out = (env, line) => run(env, line).text;
 
@@ -137,7 +138,7 @@ test('mkdir, cp, mv and rm move files around the disk', () => {
 
 test('the clock comes from the world, not from the host', () => {
   let hour = '06:15';
-  const env = U.newShell(() => hour);
+  const env = U.newShell(() => hour, NCDS);
   assert.match(out(env, 'date'), /06:15/);
   hour = '21:40';
   assert.match(out(env, 'date'), /21:40/);
