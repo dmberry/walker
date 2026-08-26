@@ -94,6 +94,15 @@
   }
   #vitals .bar i { display: block; height: 100%; width: 100%; background: #7d9a63; }
   #vitals .num { width: 20px; text-align: right; font-size: 8px; color: #8c9aa2; }
+  /* Damage reads at the edges, where you are not looking but will notice. The
+     centre stays clear so it never sits between you and the thing hitting you. */
+  #hurt {
+    position: fixed; inset: 0; pointer-events: none; z-index: 9; opacity: 0;
+    background: radial-gradient(ellipse at 50% 50%,
+      rgba(158, 22, 16, 0) 38%,
+      rgba(158, 22, 16, 0.30) 72%,
+      rgba(122, 12, 8, 0.82) 100%);
+  }
   #about {
     position: fixed; inset: 0; display: none; place-items: center;
     background: rgba(6, 9, 12, 0.55); backdrop-filter: blur(4px); z-index: 10;
@@ -209,6 +218,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="hurt"></div>
 <div id="about"><div class="card">
   <h1>WALKER</h1>
   <div class="ver">BETA &middot; VERSION <span data-version></span></div>
@@ -2491,7 +2501,7 @@ addEventListener('keydown', e => {
   if (k === ' ') { e.preventDefault(); if (!airborne && !dead) { airborne = true; jumpV = JUMP_V; } }
   if (k === 'e' && !dead) play('Interact', true);
   if (k === 'v' && !dead) play('Wave', true);
-  if (k === 'h' && !dead) { health = Math.max(0, health - 14); hurtCooldown = HP_CALM; play('HitRecieve', true, 0.06); }
+  if (k === 'h' && !dead) { hurt(14); play('HitRecieve', true, 0.06); }
   if (k === 'x' && !dead) health = 0;
 });
 addEventListener('keyup', e => held.delete(e.key.toLowerCase()));
@@ -2620,6 +2630,16 @@ const GRAVITY = -24, JUMP_V = 10.0;
 // a spell of not being hit.
 let health = 100, stamina = 100;
 let hurtCooldown = 0, dead = false, deadFor = 0, winded = false;
+// ONE DOOR FOR DAMAGE. The hit key and the fire both used to reach in and
+// subtract from health themselves, which meant anything added later would have
+// to remember to flash as well. Everything goes through hurt() now.
+let hurtFlash = 0;
+function hurt(amount) {
+  if (dead) return;
+  health = Math.max(0, health - amount);
+  hurtCooldown = HP_CALM;
+  hurtFlash = 1;
+}
 const STA_DRAIN = 19, STA_REGEN = 13, STA_REST = 24;
 const HP_REGEN = 5.5, HP_CALM = 5.0;
 const RESPAWN_AFTER = 3.4;
@@ -2634,6 +2654,7 @@ const perf = document.getElementById('perf');
 const hpFill = document.getElementById('hpFill'), stFill = document.getElementById('stFill');
 const hpNum = document.getElementById('hpNum'), stNum = document.getElementById('stNum');
 const vitals = document.getElementById('vitals');
+const hurtEl = document.getElementById('hurt');
 let last = performance.now();
 let frameNo = 0;
 let fpsAcc = 0, fpsN = 0, fps = 0;
@@ -2777,7 +2798,7 @@ function frame(now) {
   hurtCooldown = Math.max(0, hurtCooldown - dt);
   if (!dead && health > 0 && hurtCooldown === 0) health = Math.min(100, health + HP_REGEN * dt);
 
-  if (!dead && health <= 0) { dead = true; deadFor = 0; play('Death', true, 0.12); }
+  if (!dead && health <= 0) { dead = true; deadFor = 0; hurtFlash = 1; play('Death', true, 0.12); }
   if (dead) {
     deadFor += dt;
     if (deadFor > RESPAWN_AFTER) {
@@ -2795,6 +2816,16 @@ function frame(now) {
       play('Idle', false, 0);
     }
   }
+
+  // The flash decays fast; below a third of health a slow throb takes over, so
+  // the screen is telling you something even when nothing has just landed. Half
+  // a hertz, well under any flash threshold.
+  hurtFlash = Math.max(0, hurtFlash - dt * 2.4);
+  // Starts at half health rather than a third, and rises far enough to be seen:
+  // at 30 the first version reached 0.03 opacity, which is nothing.
+  const lowHp = health < 50 && !dead ? (1 - health / 50) : 0;
+  const throb = lowHp * (0.34 + 0.18 * Math.sin(now * 0.0032));
+  hurtEl.style.opacity = Math.min(0.9, Math.max(hurtFlash * 0.7, throb)).toFixed(3);
 
   hpFill.style.width = health.toFixed(1) + '%';
   stFill.style.width = stamina.toFixed(1) + '%';
@@ -2850,8 +2881,7 @@ function frame(now) {
     const dx = pos.x - fire.x, dz = pos.z - fire.z;
     const inIt = dx * dx + dz * dz < BURN_R * BURN_R && pos.y - heightAt(fire.x, fire.z) < 1.4;
     if (inIt) {
-      health = Math.max(0, health - BURN_DPS * dt);
-      hurtCooldown = HP_CALM;
+      hurt(BURN_DPS * dt);
       burnFlinch -= dt;
       if (burnFlinch <= 0 && !locked) { burnFlinch = 0.85; play('HitRecieve', true, 0.06); }
     } else {

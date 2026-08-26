@@ -79,7 +79,9 @@ Health and stamina are wired to what the world already does rather than shown
 for decoration: SHIFT spends stamina and drops back to a walk when it is gone,
 health returns only after a spell of not being hit, at zero he goes down and
 gets back up at the camp a few seconds later, and standing in the campfire
-burns. The wind is synthesised — pink
+burns. Damage reads at the edges of the screen rather than in a number: a red
+flash on the hit, and below half health a slow throb that stays until you
+recover. The wind is synthesised — pink
 noise through a lowpass whose corner and level are walked by two slow sines — so
 the page still needs no assets and nothing that can fail to load.
 
