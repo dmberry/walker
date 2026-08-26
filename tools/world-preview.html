@@ -2324,51 +2324,52 @@ function buildDatacentre() {
   dcInterior.add(racks, ledMesh);
 
   // ---- the terminal ---------------------------------------------------------
-  // ON A RACK, NOT ON FURNITURE. The free-standing console with its own cabinet
-  // read as an office prop that had wandered in; the terminal is a screen bolted
-  // to the end row of cabinets nearest the door, which is where a floor access
-  // point would actually be mounted.
+  // A SCREEN STANDING ON TOP OF THE CABINET — not set into the rack face, and
+  // not on furniture of its own. It perches on the row nearest the door like a
+  // departure board, up where you can see it over the cabinets from the doorway,
+  // tipped a few degrees down toward the aisle.
   //
-  // The screen carries the terminal's own canvas as a texture, so what is on the
-  // rack and what is in the overlay are the same pixels — no second copy of the
+  // It carries the terminal's own canvas as a texture, so what is on the rack
+  // and what is in the overlay are the same pixels — no second copy of the
   // state to fall out of step.
   {
-    // The nearest rack row to the south door stands at local z 24.2 (rows run
-    // from -D/2+12 every 6.4), its faces at z + 1.05 looking at the door. The
-    // group starting at x = 2 puts cabinets at 2, 3.55, 5.1, ...; the panel is
-    // centred over two of them.
-    const tx = 4.3, tz = 24.2 + 1.025;
-    const SW = 2.30, SH = 1.55;
+    const ROW_Z = 24.2, ROW_TOP = 2.35;      // the rack row and its height
+    const tx = 4.3, tz = ROW_Z;
+    const SW = 2.10, SH = 1.35;
+    const TILT = -0.16;                      // nodded toward the aisle
 
     const screenTex = new THREE.CanvasTexture(terminal.canvas);
     screenTex.colorSpace = THREE.SRGBColorSpace;
     screenTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     termTexture = screenTex;
 
-    const SY = base + 1.42;                  // centred at standing eye height
+    const SY = base + ROW_TOP + 0.18 + SH / 2;   // standing on the cabinet top
 
-    // Bezel behind, screen proud of it, both flat on the rack face.
+    // Two feet on the cabinet, a bezel, and the picture proud of it.
+    for (const dx of [-SW / 3, SW / 3]) {
+      const foot = new THREE.Mesh(
+        new THREE.BoxGeometry(0.14, 0.22, 0.30),
+        new THREE.MeshLambertMaterial({ color: 0x2c3238, flatShading: true }));
+      foot.position.set(tx + dx, base + ROW_TOP + 0.11, tz);
+      dcInterior.add(foot);
+    }
+
     const bez = new THREE.Mesh(
-      new THREE.BoxGeometry(SW + 0.18, SH + 0.18, 0.10),
+      new THREE.BoxGeometry(SW + 0.16, SH + 0.16, 0.09),
       new THREE.MeshLambertMaterial({ color: 0x22282f, flatShading: true }));
-    bez.position.set(tx, SY, tz + 0.10);
+    bez.position.set(tx, SY, tz);
+    bez.rotation.x = TILT;
     dcInterior.add(bez);
 
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(SW, SH),
       new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }));
-    screen.position.set(tx, SY, tz + 0.16);
+    screen.position.set(tx, SY, tz + 0.055);
+    screen.rotation.x = TILT;
     dcInterior.add(screen);
 
-    // A conduit dropping to the floor beside it, so the mount reads as wired in.
-    const duct = new THREE.Mesh(
-      new THREE.BoxGeometry(0.10, SY - SH / 2 - base, 0.06),
-      new THREE.MeshLambertMaterial({ color: 0x3a4046, flatShading: true }));
-    duct.position.set(tx + SW / 2 + 0.28, base + (SY - SH / 2 - base) / 2, tz + 0.06);
-    dcInterior.add(duct);
-
-    // Stand in front of it, in the aisle.
-    termSpot = new THREE.Vector3(DC.x + tx, 0, DC.z + tz + 1.2);
+    // Stand in front of it, in the aisle on the door side.
+    termSpot = new THREE.Vector3(DC.x + tx, 0, DC.z + tz + 1.6);
   }
 
   // ---- the light that makes it feel wrong ----------------------------------
