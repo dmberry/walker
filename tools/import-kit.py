@@ -91,11 +91,17 @@ def main():
         subprocess.run(['sips', '-Z', str(TEX_PX), dst], capture_output=True)
         print(f'  {uri:34} {os.path.getsize(dst) // 1024} KB')
 
-    # Anything left behind by an earlier run that nothing references any more.
+    # Anything left behind by an earlier run. This used to check the textures
+    # only, so dropping a model left its .gltf and .bin in the repo for good —
+    # eight of them, quietly, after the elevation plant came out. The rule is
+    # that assets/kit holds exactly what MODELS names and nothing else.
+    expected = set(wanted)
+    for _, name in MODELS:
+        expected.update((f'{name}.gltf', f'{name}.bin'))
     for f in sorted(os.listdir(OUT)):
-        if f.endswith('.png') and f not in wanted:
+        if f not in expected:
             os.remove(f'{OUT}/{f}')
-            print(f'  removed unreferenced {f}')
+            print(f'  removed stale {f}')
 
     total = sum(os.path.getsize(f'{OUT}/{f}') for f in os.listdir(OUT))
     print(f'\n{len(MODELS)} models, {total // 1024} KB in {OUT}')
