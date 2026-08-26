@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-15**.
+**Open**; the next free number is **W-16**.
 
 ## In progress
 
@@ -30,28 +30,8 @@ nostos laptop.
       material (`M_Decal_Screen`) to swap the console canvas onto.
 - [ ] **W-06.6** Walk up, prompt, key to use, escape to leave.
 
-### W-07 · Share card
-Not previewing on Messages or WhatsApp. Cause: the card is a 600 × 315 **RGBA**
-PNG, and transparency plus the half-size format is a known failure on both.
-Redrawn at 1200 × 630 opaque JPEG (17 KB) in the browser but not yet written to
-disk or verified by eye.
-
-- [ ] **W-07.1** Save the new card, look at it, replace
-      `assets/brand/share-card.png`.
-- [ ] **W-07.2** Add `og:image:width`, `og:image:height`, `og:image:type`,
-      `og:site_name`, `og:image:alt`, `twitter:title`, `twitter:description`.
-- [ ] **W-07.3** Put the same tags on `tools/world-preview.html`. Today's
-      cache-busting `location.replace` in `index.html` runs before some crawlers
-      finish reading, so whichever page they land on needs a card.
-- [ ] **W-07.4** Keep the generator as `tools/share-card.html` so it can be
-      redrawn.
-
 ## Open
 
-- [ ] **W-08 · Doors that open as you walk in.** `Door_Metal` (2.11 × 4.05 m
-      leaf, 16 tris) and `Door_Frame_Square` (4.85 × 5.01) from the MegaKit.
-      Walker's opening is `DOOR_W 8` × `DOOR_H 5.2`, so two leaves in a scaled
-      frame.
 - [ ] **W-09 · The apron outside the door** still reads as solid black from
       inside the hall. The room and the wider landscape are fixed; this band is
       not.
@@ -94,6 +74,30 @@ actually loaded get copied out of `_tmp/`.
 
 ## Done
 
+- [x] **W-08** 2026-08-26 **Doors.** Sliding leaves that part on approach were
+      already there, built from boxes; they are `Door_Metal` from the MegaKit
+      now. The opening was resized to fit the model rather than the model
+      stretched to fit the opening — at 8 m wide the leaf had to go 1.9x
+      sideways and its panel lines smeared. Scaled to the full 5.2 m height it
+      is 2.71 wide, so the bay is 5.42 m and the model is untouched. Materials
+      come down to base colour on the same Lambert as the walls, and the glTFs
+      were pruned so they stop asking for the normal and ORM maps that are not
+      shipped. 252 KB for the pair.
+
+- [x] **W-07** 2026-08-26 **Share card.** Would not preview on Messages or
+      WhatsApp: 600 × 315 is below the 1200 × 630 both clients want before they
+      stop falling back to a thumbnail, and the RGBA alpha channel made both
+      drop the preview outright. Now 1200 × 630 opaque JPEG, 20 KB, with BETA
+      tiny at the wordmark's shoulder and "A story by David M. Berry" under the
+      rule. Full card tags on both `index.html` and the game page, since the
+      cache-busting redirect means either one can be what a crawler parses.
+      Generator kept at `tools/share-card.html`.
+- [x] **W-15** 2026-08-26 **`tools/dev-server.py`.** Serves the repo and takes
+      PUT under `/_put/`, confined to the repo root and checked after path
+      resolution. The card, the ground and signage textures and the rack faces
+      are all drawn in a browser, and a browser cannot write to disk — the route
+      back into the repo was copying base64 out of the console by hand. Now the
+      canvas saves itself.
 - [x] **W-05** 2026-08-26 **Rack lamps.** Every cabinet was the same cabinet
       lamp for lamp, and a blink was the whole panel tinting light or dark. The
       face is an atlas now, six cabinets by six lamp states; a per-instance cell

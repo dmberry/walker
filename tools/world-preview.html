@@ -1676,7 +1676,15 @@ let ledFrame = null;     // which of them it is showing
 let ledAttr = null;      // the GPU-side view of ledFrame
 const flickerLights = [];
 
-const DOOR_W = 8, DOOR_H = 5.2;
+// THE OPENING FITS THE DOOR, not the other way round. The leaf is a MegaKit
+// model at 2.11 x 4.05, and stretching it 1.9x sideways to fill an 8 m gap
+// turned its panel lines into smears. Scaled to the full 5.2 m height it is
+// 2.71 wide, so two of them make a 5.42 m opening — still a bay you could get
+// a pallet through, and the model is untouched.
+const DOOR_LEAF = [2.11, 4.05];
+const DOOR_H = 5.2;
+const DOOR_SCALE = (DOOR_H - 0.12) / DOOR_LEAF[1];
+const DOOR_W = 2 * DOOR_LEAF[0] * DOOR_SCALE;
 
 function buildDatacentre() {
   const g = new THREE.Group();
@@ -1801,25 +1809,42 @@ function buildDatacentre() {
   // Two leaves that part as you come up to them. They carry no collision of
   // their own: the doorway is already a gap in the wall's blockers, and a leaf
   // that closed on you would be a way to get stuck in a wall.
-  {
-    const leafMat = new THREE.MeshLambertMaterial({
-      color: 0x2b333c, metalness: undefined, flatShading: true,
+  //
+  // The leaf is loaded rather than built. It arrives after the building does,
+  // so it adds itself to dcNear and to doorLeaves whenever it turns up; until
+  // then the doorway is simply open, which is not worth guarding against.
+  new GLTFLoader().load('../assets/kit/Door_Metal.gltf', (g) => {
+    const src = g.scene;
+    // The kit ships PBR materials with normal and ORM maps. Nothing else in
+    // this world is lit that way, and a door that alone responds to light
+    // differently reads as pasted in — so it comes down to the base colour on
+    // the same Lambert the walls use, and the other two maps are not shipped.
+    src.traverse(o => {
+      if (!o.isMesh) return;
+      const map = o.material.map || null;
+      o.material = new THREE.MeshLambertMaterial({ color: 0x9aa3ab, map });
+      o.castShadow = o.receiveShadow = true;
     });
+
+    // Where the model's own origin sits is the kit's business, not ours: measure
+    // it and place by the box rather than by the pivot.
+    const bb = new THREE.Box3().setFromObject(src);
+    const mid = bb.getCenter(new THREE.Vector3());
+    const foot = bb.min.y;
+
     for (const sgn of [-1, 1]) {
-      const leaf = new THREE.Mesh(
-        new THREE.BoxGeometry(DOOR_W / 2 + 0.05, DOOR_H - 0.12, 0.16), leafMat);
-      leaf.castShadow = leaf.receiveShadow = true;
-      leaf.position.set(sgn * DOOR_W / 4, base + (DOOR_H - 0.12) / 2, D / 2 + 0.12);
-      // A pale band across each leaf, the way every service door has one.
-      const band = new THREE.Mesh(
-        new THREE.BoxGeometry(DOOR_W / 2 + 0.06, 0.14, 0.2),
-        new THREE.MeshLambertMaterial({ color: 0xb9c2c9, flatShading: true }));
-      band.position.set(0, -DOOR_H * 0.16, 0);
-      leaf.add(band);
+      const leaf = new THREE.Group();
+      const m = src.clone(true);
+      m.position.set(-mid.x, -foot, -mid.z);
+      m.scale.setScalar(DOOR_SCALE);
+      m.position.multiplyScalar(DOOR_SCALE);
+      leaf.add(m);
+      leaf.position.set(sgn * DOOR_W / 4, base, D / 2 + 0.12);
       dcNear.add(leaf);
       doorLeaves.push({ mesh: leaf, home: sgn * DOOR_W / 4, sgn });
     }
-  }
+    renderer.shadowMap.needsUpdate = true;
+  });
 
   // Wall collision, with the doorway left open.
   const wallTop = heightAt(DC.x, DC.z) + base + H;
