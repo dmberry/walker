@@ -81,7 +81,7 @@ actually loaded get copied out of `_tmp/`.
 
 ## Done
 
-- [x] **W-24** 2026-08-26 **The mezzanine.** An office floor over the east end
+- [x] **W-24** 2026-08-26 (revised through the day) **The mezzanine.** An office floor over the east end
       of the hall at 6 m, reached by a straight sixteen-step flight. See-through
       at 13 per cent from below (the camera looks down through it at the racks)
       and resolving to solid as you climb — driven by height, so it fades in on

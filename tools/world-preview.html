@@ -318,7 +318,7 @@ import { createTerminal } from '../src/terminal.js';
 // THE VERSION LIVES HERE AND NOWHERE ELSE. It was written into the title and
 // into the about box separately, which is two places to remember and one to
 // forget. Every span marked data-version is filled from this.
-const VERSION = '0.101';
+const VERSION = '1.1';
 for (const el of document.querySelectorAll('[data-version]')) el.textContent = VERSION;
 
 const fail = (m) => { const e = document.getElementById('err'); e.hidden = false; e.textContent += m + '\n'; };
@@ -736,7 +736,8 @@ function groundY(x, z, refY) {
   let h = heightAt(x, z) + (onApron(x, z) ? APRON_H : 0);
   if (MEZZ !== null && refY !== undefined) {
     const m = MEZZ;
-    if (x > m.rx0 && x < m.rx1 && Math.abs(z - m.rz) < m.rhw) {
+    if (x > Math.min(m.rx0, m.rx1) && x < Math.max(m.rx0, m.rx1)
+        && Math.abs(z - m.rz) < m.rhw) {
       const t = (x - m.rx0) / (m.rx1 - m.rx0);
       const ry = m.ground + t * (m.y - m.ground);
       if (ry <= refY + STEP_UP && ry > h) h = ry;
@@ -1815,6 +1816,7 @@ const LAYOUTS = 6;       // and how many different cabinets there are to be
 let ledFrame = null;     // which of them it is showing
 let mezzMats = [];       // every mezzanine material, for the reveal
 let mezzOpacity = 0.13;  // where the fade currently stands
+let mezzUp = false;      // whether the near walls are restored for the deck
 let ledAttr = null;      // the GPU-side view of ledFrame
 const flickerLights = [];
 
@@ -2433,14 +2435,26 @@ function buildDatacentre(spec) {
   }
 
   // ---- the mezzanine --------------------------------------------------------
-  // An office floor over the east end of the hall, reached by a straight
-  // flight of stairs. SEE-THROUGH UNTIL YOU ARE ON IT: the camera looks down
-  // through it at the racks, so at ground level it is a pale suggestion at 13
-  // per cent; climb the stairs and it resolves to solid. The offices are set
-  // dressing for now — desks, dead screens, cabinets — looting comes later.
+  // An office floor over the WEST end of the hall, reached by a straight
+  // flight of stairs rising westward. West, because the camera's default view
+  // comes over the south-east shoulder: on the east end the deck sat between
+  // the camera and most of the hall, and even at 13 per cent that is a veil
+  // over the whole room. On the west it hangs at the back of the view.
+  //
+  // SEE-THROUGH UNTIL YOU ARE ON IT — except the stairs. The deck and offices
+  // fade so the camera can read the racks below; the flight is how you get up,
+  // and an invitation you cannot see is not an invitation, so it stays solid.
   if (spec.mezzanine) {
-    const MZ = { x0: 40, x1: W / 2 - 4, z0: -D / 2 + 4, z1: D / 2 - 4, h: 6.0 };
+    // TO THE WALLS. The first deck stopped four metres short of them on three
+    // sides, which left a moat you could look down into and no way to explain
+    // it. It meets the west, north and south walls now; only the east edge is
+    // open, and that is where the rail runs.
+    const MZ = { x0: -W / 2 + 0.5, x1: -40, z0: -D / 2 + 0.5, z1: D / 2 - 0.5, h: 6.0 };
     const mz = new THREE.Group();
+    // Against the back wall. The racks stop 11 m short of it, so the flight
+    // sits in that clear band and crosses nothing — and a stair against a wall
+    // is where a mezzanine stair belongs.
+    const STAIR_Z = -33.0;
 
     const mzMat = (col, opts = {}) => {
       const m = new THREE.MeshLambertMaterial({
@@ -2449,8 +2463,17 @@ function buildDatacentre(spec) {
       mezzMats.push(m);
       return m;
     };
-    const mzBox = (w, h, d, col, x, y, z) => {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mzMat(col));
+    const mzBox = (w, h, d, col, x, y, z, opts) => {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mzMat(col, opts));
+      b.position.set(x, y, z);
+      b.castShadow = b.receiveShadow = false;
+      mz.add(b);
+      return b;
+    };
+    // The always-solid variant, for the flight.
+    const solidBox = (w, h, d, col, x, y, z) => {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshLambertMaterial({ color: col, flatShading: true }));
       b.position.set(x, y, z);
       b.castShadow = b.receiveShadow = false;
       mz.add(b);
@@ -2462,10 +2485,42 @@ function buildDatacentre(spec) {
     const deckY = base + MZ.h;
 
     // The deck, and the beams that carry it to the floor. The walking surface
-    // is resin green, the way plant-room office floors are painted — it also
-    // tells you at a glance you are on a different floor with different rules.
+    // is TILED — the same tile the hall floor wears, tinted green the way
+    // plant-room office floors are painted, so it reads as a laid floor rather
+    // than a sprayed slab and still tells you at a glance you are somewhere
+    // with different rules.
     mzBox(mw, 0.40, md, 0x8d949b, mx, deckY - 0.25, mzc);
-    mzBox(mw - 0.4, 0.06, md - 0.4, 0x5f7a52, mx, deckY - 0.03, mzc);
+    // DRAWN, NOT PHOTOGRAPHED. floor.jpg tinted green tiled across forty
+    // metres read as camouflage — the photo's own mottle beat the grid at any
+    // repeat. What says "tiled" at this camera is the GROUT, so the tile is a
+    // canvas: flat green fields, a darker grout line, a hairline highlight
+    // under it, and the faintest per-tile variation so the field is not paint.
+    const mzTile = (() => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 256;
+      const c = cv.getContext('2d');
+      const T2 = 128;                            // two tiles per canvas edge
+      for (let ty = 0; ty < 2; ty++) {
+        for (let tx = 0; tx < 2; tx++) {
+          const v = 8 * ((tx + ty * 2 + 1) % 3);   // three close greens, no pattern
+          c.fillStyle = 'rgb(' + (128 + v) + ',' + (148 + v) + ',' + (112 + v) + ')';
+          c.fillRect(tx * T2, ty * T2, T2, T2);
+          c.fillStyle = 'rgba(60,72,52,0.9)';      // grout
+          c.fillRect(tx * T2, ty * T2, T2, 3);
+          c.fillRect(tx * T2, ty * T2, 3, T2);
+          c.fillStyle = 'rgba(255,255,255,0.10)';  // the light catching the edge
+          c.fillRect(tx * T2, ty * T2 + 3, T2, 1);
+        }
+      }
+      const t = new THREE.CanvasTexture(cv);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      t.repeat.set(mw / 2.4, md / 2.4);            // 1.2 m tiles
+      return t;
+    })();
+    mzBox(mw - 0.4, 0.06, md - 0.4, 0xffffff, mx, deckY - 0.03, mzc, { map: mzTile });
+
     for (const bx of [MZ.x0 + 2, mx, MZ.x1 - 2]) {
       for (const bz of [MZ.z0 + 3, mzc, MZ.z1 - 3]) {
         mzBox(0.6, MZ.h - 0.45, 0.6, 0x6d757c, bx, base + (MZ.h - 0.45) / 2, bz);
@@ -2476,7 +2531,8 @@ function buildDatacentre(spec) {
       }
     }
 
-    // Rails round the open edges, with a gap where the stairs land.
+    // Rails round the open edges, with a gap on the east edge where the
+    // stairs land.
     const RAIL_H = 1.1;
     const rail = (w, d, x, z) => {
       mzBox(w, 0.08, d, 0xb9c0c6, x, deckY + RAIL_H, z);
@@ -2488,21 +2544,31 @@ function buildDatacentre(spec) {
               z + (d > w ? (t - 0.5) * d : 0));
       }
     };
-    rail(0.1, MZ.z1 - 2 - 2, MZ.x0, (MZ.z0 + 4 + MZ.z1) / 2 + 2);   // west, above the gap
-    rail(0.1, 4, MZ.x0, MZ.z0 + 2);                                  // west, below it
-    rail(mw, 0.1, mx, MZ.z0);                                        // north
-    rail(mw, 0.1, mx, MZ.z1);                                        // south
+    // Only the east edge is open, so only the east edge is railed. The stair
+    // gap sits at the aisle the flight descends into.
+    const GAP0 = STAIR_Z - 2.2, GAP1 = STAIR_Z + 2.2;
+    rail(0.1, GAP0 - MZ.z0, MZ.x1, (MZ.z0 + GAP0) / 2);              // north of the gap
+    rail(0.1, MZ.z1 - GAP1, MZ.x1, (GAP1 + MZ.z1) / 2);              // south of it
 
-    // The flight: rises east from the hall floor to the deck's west edge.
-    const R = { x0: MZ.x0 - 12.4, x1: MZ.x0, z: MZ.z0 + 6, hw: 2.0 };
+    // The flight: rises WESTWARD from the hall floor to the deck's east edge.
+    // Solid at every height — see above.
+    //
+    // IN AN AISLE, NOT THROUGH A GROUP. The first landing put the run across
+    // x -40..-28 at the north side, which is inside a rack group — the flight
+    // descended straight through a row of cabinets. The rows stand at
+    // z = -27 + 6.4k with about 4.3 m clear between them; the run now descends
+    // along one of those aisles, which no cabinet ever occupies at any x.
+    const R = { from: MZ.x1 + 12.4, to: MZ.x1, z: STAIR_Z, hw: 2.0 };
     const steps = 16;
-    const stepGeo = new THREE.BoxGeometry((R.x1 - R.x0) / steps, 0.12, R.hw * 2);
-    const stepMesh = new THREE.InstancedMesh(stepGeo, mzMat(0x9aa1a8), steps);
+    const run = R.to - R.from;                    // negative: the flight runs west
+    const stepGeo = new THREE.BoxGeometry(Math.abs(run) / steps, 0.12, R.hw * 2);
+    const stepMesh = new THREE.InstancedMesh(stepGeo,
+      new THREE.MeshLambertMaterial({ color: 0x9aa1a8, flatShading: true }), steps);
     stepMesh.castShadow = stepMesh.receiveShadow = false;
     const sm = new THREE.Object3D();
     for (let i = 0; i < steps; i++) {
       const t = (i + 0.5) / steps;
-      sm.position.set(R.x0 + t * (R.x1 - R.x0), base + t * MZ.h, R.z);
+      sm.position.set(R.from + t * run, base + t * MZ.h, R.z);
       sm.updateMatrix();
       stepMesh.setMatrixAt(i, sm.matrix);
     }
@@ -2510,20 +2576,22 @@ function buildDatacentre(spec) {
     mz.add(stepMesh);
     // Stringers under the steps, so the flight reads as a structure.
     for (const dz of [-R.hw, R.hw]) {
-      const st = mzBox(Math.hypot(R.x1 - R.x0, MZ.h), 0.35, 0.14, 0x6d757c,
-                       (R.x0 + R.x1) / 2, base + MZ.h / 2 - 0.1, R.z + dz);
-      st.rotation.z = Math.atan2(MZ.h, R.x1 - R.x0);
+      const st = solidBox(Math.hypot(run, MZ.h), 0.35, 0.14, 0x6d757c,
+                          (R.from + R.to) / 2, base + MZ.h / 2 - 0.1, R.z + dz);
+      st.rotation.z = Math.atan2(MZ.h, run);
     }
 
     // ---- the offices ---------------------------------------------------------
     // Three rooms along the north side: stub partitions and furniture.
     const PART_H = 2.5;
+    // At the far end from the stairs: you land on open deck and the rooms are
+    // a walk away, which is also where looting will want them.
     for (let room = 0; room < 3; room++) {
-      const rx = MZ.x0 + 5 + room * 12;
+      const rx = MZ.x0 + 3 + room * 10;
       mzBox(0.18, PART_H, 10, 0xdcdcd6, rx, deckY + PART_H / 2, MZ.z0 + 5);
-      // A WORKSTATION, NOT A SIDE TABLE. The first pass used real desk
-      // dimensions and at this camera they read as doll furniture; interior
-      // props need to run about half as large again as life to hold their own.
+      // A WORKSTATION, NOT A SIDE TABLE. Real desk dimensions read as doll
+      // furniture at this camera; interior props run about half as large again
+      // as life to hold their own.
       mzBox(3.2, 0.14, 1.5, 0xc9ccc7, rx + 5, deckY + 0.86, MZ.z0 + 3);
       for (const dx of [-1.4, 1.4]) {
         mzBox(0.16, 0.80, 1.3, 0x6d757c, rx + 5 + dx, deckY + 0.40, MZ.z0 + 3);
@@ -2537,16 +2605,17 @@ function buildDatacentre(spec) {
       mzBox(0.85, 0.95, 0.12, 0x3a4046, rx + 5.4, deckY + 1.0, MZ.z0 + 4.8);
       mzBox(0.9, 1.55, 0.8, 0x767d84, rx + 9.2, deckY + 0.775, MZ.z0 + 1.8);
     }
-    mzBox(0.18, PART_H, 10, 0xdcdcd6, MZ.x0 + 41, deckY + PART_H / 2, MZ.z0 + 5);
+    mzBox(0.18, PART_H, 10, 0xdcdcd6, MZ.x0 + 33, deckY + PART_H / 2, MZ.z0 + 5);
 
     dcInterior.add(mz);
 
-    // What the movement needs, in world coordinates.
+    // What the movement needs, in world coordinates. The ramp is stored floor
+    // end first; groundY takes the ends in either order.
     MEZZ = {
       x0: DC.x + MZ.x0, x1: DC.x + MZ.x1, z0: DC.z + MZ.z0, z1: DC.z + MZ.z1,
       y: heightAt(DC.x, DC.z) + deckY,
       ground: heightAt(DC.x, DC.z) + base,
-      rx0: DC.x + R.x0, rx1: DC.x + R.x1, rz: DC.z + R.z, rhw: R.hw,
+      rx0: DC.x + R.from, rx1: DC.x + R.to, rz: DC.z + R.z, rhw: R.hw,
     };
 
     // Rails and furniture as blockers that exist only for feet at deck height,
@@ -2554,19 +2623,18 @@ function buildDatacentre(spec) {
     const mzTop = MEZZ.y + 3.0, mzBot = MEZZ.y - 1.2;
     const mb = (x, z, hw, hd) => blockers.push({
       x: DC.x + x, z: DC.z + z, hw, hd, top: mzTop, bottom: mzBot });
-    mb(mx, MZ.z0, mw / 2, 0.25);                                  // north rail
-    mb(mx, MZ.z1, mw / 2, 0.25);                                  // south rail
-    mb(MZ.x1, mzc, 0.25, md / 2);                                 // east wall side
-    mb(MZ.x0, (MZ.z0 + 4 + MZ.z1) / 2 + 2, 0.25, (md - 8) / 2);  // west, above the stair gap
+    // The walls hold the other three edges at every height already.
+    mb(MZ.x1, (MZ.z0 + GAP0) / 2, 0.25, (GAP0 - MZ.z0) / 2);      // east, north of the gap
+    mb(MZ.x1, (GAP1 + MZ.z1) / 2, 0.25, (MZ.z1 - GAP1) / 2);      // east, south of it
     for (let room = 0; room < 3; room++) {
-      const rx = MZ.x0 + 5 + room * 12;
+      const rx = MZ.x0 + 3 + room * 10;
       mb(rx, MZ.z0 + 5, 0.3, 5);                                  // partitions
       mb(rx + 5, MZ.z0 + 3, 1.7, 0.8);                            // desks
     }
     // And the stair sides, live only once you are off the floor.
     for (const dz of [-R.hw - 0.15, R.hw + 0.15]) {
-      blockers.push({ x: DC.x + (R.x0 + R.x1) / 2, z: DC.z + R.z + dz,
-                      hw: (R.x1 - R.x0) / 2, hd: 0.15,
+      blockers.push({ x: DC.x + (R.from + R.to) / 2, z: DC.z + R.z + dz,
+                      hw: Math.abs(run) / 2, hd: 0.15,
                       top: mzTop, bottom: heightAt(DC.x, DC.z) + base + 0.9 });
     }
   }
@@ -2912,8 +2980,8 @@ function setIndoors(v) {
   if (v === indoors) return;
   indoors = v;
   dcRoof.visible = !v;
-  dcNear.visible = !v;
-  dcGhost.visible = v;
+  dcNear.visible = !v || mezzUp;
+  dcGhost.visible = v && !mezzUp;
   renderer.shadowMap.needsUpdate = true;
   applyLight();
 }
@@ -3821,7 +3889,12 @@ function frame(now) {
     // a hill and sliding up one.
     const ahead = 0.6;
     const fx = Math.sin(root.rotation.y), fz = Math.cos(root.rotation.y);
-    const grade = airborne ? 0
+    // NOT ON THE STAIRS. The pitch-into-the-gradient trick sells a hillside,
+    // where the ground really is tilted; a stair is level treads, and a body
+    // climbing one stays upright.
+    const onStairs = MEZZ && Math.abs(pos.z - MEZZ.rz) < MEZZ.rhw
+      && pos.x > Math.min(MEZZ.rx0, MEZZ.rx1) && pos.x < Math.max(MEZZ.rx0, MEZZ.rx1);
+    const grade = (airborne || onStairs) ? 0
       : (groundY(pos.x + fx * ahead, pos.z + fz * ahead, pos.y) - gh) / ahead;
     const lean = Math.max(-0.28, Math.min(0.28, Math.atan(grade) * 0.55));
     root.rotation.order = 'YXZ';
@@ -3962,6 +4035,16 @@ function frame(now) {
         m.opacity = mezzOpacity;
         m.depthWrite = solid;
       }
+    }
+    // THE WALLS COME BACK UP HERE. The near walls strip away indoors so the
+    // camera can see the hall floor — but from the deck they no longer stand
+    // between the camera and you, and their absence reads as a hole in the
+    // building. The roof stays off: it genuinely would block.
+    if (up !== mezzUp) {
+      mezzUp = up;
+      dcNear.visible = !indoors || up;
+      dcGhost.visible = indoors && !up;
+      renderer.shadowMap.needsUpdate = true;
     }
   }
 
