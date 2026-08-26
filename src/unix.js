@@ -70,14 +70,14 @@ function parentOf(root, parts) {
 
 // ---- the disk ---------------------------------------------------------------
 const MAN = {
-  ls: 'ls [-l] [path]\n  List a directory. A name ending in / is a directory.\n  -l gives the long form: mode, links, owner, size, date.',
-  cd: 'cd [path]\n  Change directory. `cd` alone goes home, `cd ..` goes up.',
+  ls: 'ls [-l] [path]\n  List a directory. A name ending in / is a\n  directory. -l gives the long form: mode,\n  links, owner, size, date.',
+  cd: 'cd [path]\n  Change directory. `cd` alone goes home,\n  `cd ..` goes up.',
   pwd: 'pwd\n  Print the working directory.',
   cat: 'cat <file>\n  Print a file. Pipe it: cat var/log/bms.log | grep CRAC',
-  echo: 'echo <text>\n  Print text. Redirect it: echo "seen" > home/guest/notes',
-  man: 'man <topic>\n  Read the manual for a command. The pages are in /usr/man.',
-  grep: 'grep <pattern> [file]\n  Print matching lines. Reads a pipe if no file is given.\n  The pattern is a regular expression, case insensitive.',
-  wc: 'wc [file]\n  Count lines, words and characters. Reads a pipe if no file is given.',
+  echo: 'echo <text>\n  Print text. Redirect it:\n  echo "seen" > home/guest/notes',
+  man: 'man <topic>\n  Read the manual for a command. The pages\n  are in /usr/man.',
+  grep: 'grep <pattern> [file]\n  Print matching lines. Reads a pipe if no\n  file is given. The pattern is a regular\n  expression, case insensitive.',
+  wc: 'wc [file]\n  Count lines, words and characters. Reads\n  a pipe if no file is given.',
   head: 'head [-n] [file]\n  First lines only, ten by default.',
   tail: 'tail [-n] [file]\n  Last lines only, ten by default.',
   sort: 'sort [file]\n  Sort lines.',
@@ -97,16 +97,19 @@ const MAN = {
 };
 
 const MOTD = [
+  // Wrapped by hand to the console's 56 columns. The renderer wraps too, but it
+  // breaks mid-word; prose this short is better set to fit.
   'NEOCLOUD DATA SOLUTIONS',
   'Hall 1 floor access terminal.',
   '',
-  'This machine reads the building: environment, power, rack inventory,',
-  'the maintenance log and the door and camera records. It has no route',
-  'to the control plane and no route off site. Anything above the floor',
-  'is done from operations.',
+  'This machine reads the building: environment, power,',
+  'rack inventory, the maintenance log and the door and',
+  'camera records. It has no route to the control plane',
+  'and no route off site. Anything above the floor is',
+  'done from operations.',
   '',
-  'Guest sessions are not logged out. Walk away and it stays where you',
-  'left it.',
+  'Guest sessions are not logged out. Walk away and it',
+  'stays where you left it.',
 ].join('\n');
 
 function makeDisk() {

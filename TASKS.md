@@ -10,25 +10,7 @@ decimal (`W-06.3`). New work takes the next free number at the bottom of
 
 ## In progress
 
-### W-06 · Terminal access point
-One machine in the hall gets a screen running a simulated terminal. Basis: the
-nostos laptop.
-
-- [x] **W-06.1** `src/console-buffer.js` — the console model, copied from nostos
-      unchanged apart from the header.
-- [x] **W-06.2** `src/unix.js` — the shell, rebuilt on the laptop's
-      architecture: `{d:{}}` / `{f:''}` nodes, `resolvePath`/`lookup`, a
-      `COMMANDS` table, pipes and `>` redirect, man pages on the disk. Neocloud's
-      own content, none of the Odyssey. Exercised: `cat … | grep … | wc`,
-      `ls -l`, `echo > file`, `man`, unknown command.
-- [x] **W-06.3** `src/terminal.js` — canvas renderer, scanlines, block caret at
-      1.4 Hz.
-- [ ] **W-06.4** Rewire `terminal.js` to `unix.js`; it still carries its own
-      first-pass shell.
-- [ ] **W-06.5** Put it in the world. `Prop_AccessPoint` from the MegaKit is a
-      0.44 × 0.47 × 1.3 m floor pedestal, 738 tris, and already has a screen
-      material (`M_Decal_Screen`) to swap the console canvas onto.
-- [ ] **W-06.6** Walk up, prompt, key to use, escape to leave.
+(nothing at the moment)
 
 ## Open
 
@@ -90,6 +72,22 @@ same as `tools/import-nature.py` does for the nature pack, and only the files
 actually loaded get copied out of `_tmp/`.
 
 ## Done
+
+- [x] **W-06** 2026-08-26 **Terminal access point.** A 2.3 m screen bolted to
+      the rack row nearest the door, white on black at 56 × 20 so it reads as a
+      terminal from across the aisle, with a conduit dropping to the floor.
+      Walk up → `E ACCESS TERMINAL` → the same canvas opens full-screen; ESC or
+      `exit` steps away, movement freezes while it is up, and every key
+      (including ^C/^U/^L and Tab completion) goes to the shell. Behind it:
+      `console-buffer.js` (nostos, unchanged), `unix.js` (the laptop's
+      architecture, Neocloud's content — pipes, redirect, man pages on the
+      disk, logs with CRAC 4's bearing fault open), `terminal.js` (the glue and
+      the picture). The canvas uploads to the GPU only when something changed.
+      MOTD and man pages hand-wrapped to 56 columns.
+      Two placement bugs on the way: the reach test compared a 3D distance
+      whose Y was plinth-local against a world-height position, so it never
+      passed; and the first mount was a free-standing console that read as
+      furniture.
 
 - [x] **W-08b** 2026-08-26 **The door glitch, properly.** Not z-fighting.
       `shadowMap.autoUpdate` is off, so the map is baked on demand — and the

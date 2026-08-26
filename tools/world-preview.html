@@ -1757,6 +1757,11 @@ let termTexture = null;         // repainted only while the caret moves
 let termSpot = null;            // where you have to stand
 let termActive = false;         // and whether you are using it
 const TERM_REACH = 4.5;
+// IN THE GROUND PLANE. termSpot.y is the local plinth height and pos.y is a
+// world height with the terrain under the building in it, so a 3D distance was
+// never inside reach however close you stood — the hint simply never lit.
+const nearTerminal = () =>
+  termSpot && Math.hypot(pos.x - termSpot.x, pos.z - termSpot.z) < TERM_REACH;
 const doorLeaves = [];
 let doorOpen = 0;      // 0 shut, 1 wide
 let ledMesh = null, ledCount = 0;
@@ -2319,50 +2324,51 @@ function buildDatacentre() {
   dcInterior.add(racks, ledMesh);
 
   // ---- the terminal ---------------------------------------------------------
-  // A floor console in the clear strip inside the door, before the first rack.
-  // The screen carries the terminal's own canvas as a texture, so what is on the
-  // console and what is in the overlay are the same pixels — there is no second
-  // copy of the state to fall out of step.
+  // ON A RACK, NOT ON FURNITURE. The free-standing console with its own cabinet
+  // read as an office prop that had wandered in; the terminal is a screen bolted
+  // to the end row of cabinets nearest the door, which is where a floor access
+  // point would actually be mounted.
   //
-  // TWICE THE SIZE IT WAS. At 86 cm across a room this dark it read as a black
-  // rectangle on a stick; you could not tell it was a screen, let alone a
-  // terminal. 1.7 m on a cabinet is a machine you can see from the door.
+  // The screen carries the terminal's own canvas as a texture, so what is on the
+  // rack and what is in the overlay are the same pixels — no second copy of the
+  // state to fall out of step.
   {
-    const tx = 6.2, tz = D / 2 - 9.0;
-    const SW = 1.70, SH = 1.18;              // the screen
-    const CAB_H = 0.95;                      // and what it stands on
-
-    // The cabinet. A plain box with a lighter top, which is what a floor console
-    // in a plant room actually is.
-    put(box(1.95, CAB_H, 0.85, 0x767d84, 0), tx, base + CAB_H / 2, tz, false, dcInterior);
-    put(box(2.05, 0.08, 0.95, 0xb2b8bd, 0), tx, base + CAB_H + 0.04, tz, false, dcInterior);
-    // A kick plate, so it does not look like it is floating.
-    put(box(1.75, 0.10, 0.70, 0x2c3238, 0), tx, base + 0.05, tz, false, dcInterior);
+    // The nearest rack row to the south door stands at local z 24.2 (rows run
+    // from -D/2+12 every 6.4), its faces at z + 1.05 looking at the door. The
+    // group starting at x = 2 puts cabinets at 2, 3.55, 5.1, ...; the panel is
+    // centred over two of them.
+    const tx = 4.3, tz = 24.2 + 1.025;
+    const SW = 2.30, SH = 1.55;
 
     const screenTex = new THREE.CanvasTexture(terminal.canvas);
     screenTex.colorSpace = THREE.SRGBColorSpace;
     screenTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
     termTexture = screenTex;
 
-    const TILT = -0.26;                      // tipped back, as a console is
-    const SY = base + CAB_H + 0.10 + SH / 2;
+    const SY = base + 1.42;                  // centred at standing eye height
 
-    // The bezel first, then the picture standing proud of it.
+    // Bezel behind, screen proud of it, both flat on the rack face.
     const bez = new THREE.Mesh(
-      new THREE.BoxGeometry(SW + 0.16, SH + 0.16, 0.10),
+      new THREE.BoxGeometry(SW + 0.18, SH + 0.18, 0.10),
       new THREE.MeshLambertMaterial({ color: 0x22282f, flatShading: true }));
-    bez.position.set(tx, SY, tz + 0.06);
-    bez.rotation.x = TILT;
+    bez.position.set(tx, SY, tz + 0.10);
     dcInterior.add(bez);
 
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(SW, SH),
       new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }));
-    screen.position.set(tx, SY + 0.008, tz + 0.125);
-    screen.rotation.x = TILT;
+    screen.position.set(tx, SY, tz + 0.16);
     dcInterior.add(screen);
 
-    termSpot = new THREE.Vector3(DC.x + tx, base, DC.z + tz);
+    // A conduit dropping to the floor beside it, so the mount reads as wired in.
+    const duct = new THREE.Mesh(
+      new THREE.BoxGeometry(0.10, SY - SH / 2 - base, 0.06),
+      new THREE.MeshLambertMaterial({ color: 0x3a4046, flatShading: true }));
+    duct.position.set(tx + SW / 2 + 0.28, base + (SY - SH / 2 - base) / 2, tz + 0.06);
+    dcInterior.add(duct);
+
+    // Stand in front of it, in the aisle.
+    termSpot = new THREE.Vector3(DC.x + tx, 0, DC.z + tz + 1.2);
   }
 
   // ---- the light that makes it feel wrong ----------------------------------
@@ -3275,8 +3281,7 @@ addEventListener('keydown', e => {
   if (k === '-') dist = Math.min(30, dist * 1.14);
   if (k === '=' || k === '+') dist = Math.max(3.5, dist / 1.14);
   if (k === 'p') ortho = !ortho;
-  if (k === 'e' && termSpot && !dead
-      && pos.distanceTo(termSpot) < TERM_REACH) openTerm();
+  if (k === 'e' && !dead && nearTerminal()) openTerm();
   if (k === 'g') grid.visible = !grid.visible;
   if (k === 'm') muted = !muted;
   if (k === 'u') { chromeIdx = (chromeIdx + 1) % CHROME.length; applyChrome(); }
@@ -3714,7 +3719,7 @@ function frame(now) {
   // to the GPU when it actually changed — a 780 by 640 upload every frame for a
   // block that blinks at 1.4 Hz would be most of the cost of the room.
   if (termSpot) {
-    const near = !termActive && !dead && pos.distanceTo(termSpot) < TERM_REACH;
+    const near = !termActive && !dead && nearTerminal();
     if (near !== termHint.classList.contains('on')) termHint.classList.toggle('on', near);
     if (terminal.tick(dt) && termTexture) termTexture.needsUpdate = true;
   }

@@ -111,10 +111,10 @@ test('quoted arguments survive the tokeniser', () => {
 
 test('man reads the page off the disk rather than out of the binary', () => {
   const env = shell();
-  assert.match(out(env, 'man grep'), /regular expression/);
+  assert.match(out(env, 'man grep').replace(/\s+/g, ' '), /regular expression/);
   assert.match(run(env, 'man nosuchthing').text, /no manual entry/);
   // the pages really are files
-  assert.match(out(env, 'cat /usr/man/grep'), /regular expression/);
+  assert.match(out(env, 'cat /usr/man/grep').replace(/\s+/g, ' '), /regular expression/);
 });
 
 test('mkdir, cp, mv and rm move files around the disk', () => {
