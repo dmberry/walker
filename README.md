@@ -240,6 +240,31 @@ _tmp/            every pack in full. Nothing here ships.
 what texture size, so the import can be repeated rather than remembered.
 Everything is CC0 from Quaternius; each folder carries its licence.
 
+## Where this got to
+
+Live at **https://dmberry.github.io/walker/**, source at
+**https://github.com/dmberry/walker**. The whole game is
+`tools/world-preview.html`; there is no build step.
+
+Open, in rough order of how much they would change:
+
+- **No climb clip and no jump clip.** Neither is in the 13-clip glb nor in the
+  24-clip source — the pack ships `Roll`, a dodge, and nothing else off the
+  flat. The jump is physics with the body holding its pose, and slopes are met
+  by pitching the root into the gradient. Both are stand-ins for hand-keyed
+  poses, and so is the missing archery pose the plan already records.
+- **Only the male Adventurer is converted.** `models/` has one glb.
+- **three.js is at runtime**, 768 KB vendored. The plan's §8 question about
+  writing the skinned-mesh renderer by hand is still open, and now it would also
+  have to carry the terrain, the props and the spotlights.
+- **`tools/character-preview.html` cannot run from the published site** — it
+  reads the two modular character packs as glTF and those are gitignored. It
+  works locally with the packs in `_tmp/sprites/`.
+- **`reference/kenney/`** is sixteen PNGs of the sprites this replaced, kept for
+  comparison and no longer referenced by anything.
+- **The directory is `clouds`, the repo is `walker`.** Renaming the directory
+  would break the local preview config in `.claude/launch.json`.
+
 ## Licence
 
 **Walker is free software, licensed GPL-3.0-or-later.** See `LICENSE` for the
