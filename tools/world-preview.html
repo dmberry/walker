@@ -1749,17 +1749,23 @@ function buildDatacentre() {
       signLights.push({ spot, glass: glassMat });
     } else {
       body.add(part(0.30, 0.28, 0.62, 0xd8dcdf));
+      // THE LENS GOES ON THE FAR END. Local -Z points back at the wall, so a
+      // lens and a pilot placed there were on the side nobody can see and the
+      // camera was watching the building it is bolted to. Both belong at +Z,
+      // the end pointing out over the yard.
       const hood = part(0.34, 0.06, 0.40, 0xb2b7bb);
-      hood.position.set(0, 0.17, -0.06);
+      hood.position.set(0, 0.17, 0.06);
       body.add(hood);
-      const lens = part(0.16, 0.16, 0.06, 0x15181b);
-      lens.position.set(0, 0, -0.32);
+      const lens = part(0.17, 0.17, 0.06, 0x15181b);
+      lens.position.set(0, 0, 0.33);
       body.add(lens);
       const lampMat = new THREE.MeshLambertMaterial({
         color: 0x50201c, emissive: new THREE.Color(0xff2a1c), emissiveIntensity: 0,
       });
-      const pilot = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), lampMat);
-      pilot.position.set(0.10, 0.10, -0.31);
+      // Bigger than a real one, because at this camera a true-scale LED is
+      // under a pixel and the blink might as well not happen.
+      const pilot = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), lampMat);
+      pilot.position.set(0.11, 0.11, 0.31);
       body.add(pilot);
       pilots.push({ mat: lampMat, phase: pilots.length * 0.31 });
     }
@@ -2490,11 +2496,15 @@ function frame(now) {
     // they never pulse together. Photosensitive guidance puts the danger above
     // three flashes a second; this is an order of magnitude under it, and reads
     // as something idling rather than as an alarm.
-    const t = now * 0.00033;
+    // 0.4 Hz — one every two and a half seconds — and lit for a third of that
+    // rather than a sixth: at 16% duty the lamp was dark almost every time you
+    // looked at it, which is not a blinking light, it is an off one. It never
+    // goes fully out either, the way a real standby LED does not.
+    const t = now * 0.0004;
     for (const c of pilots) {
       const cycle = (t + c.phase) % 1;
-      const pulse = cycle < 0.16 ? Math.sin((cycle / 0.16) * Math.PI) : 0;
-      c.mat.emissiveIntensity = 0.10 + pulse * 0.90;
+      const pulse = cycle < 0.34 ? Math.sin((cycle / 0.34) * Math.PI) : 0;
+      c.mat.emissiveIntensity = 0.28 + pulse * 1.5;
     }
   }
 
