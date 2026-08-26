@@ -1377,6 +1377,7 @@ function lightTheFire(group, x, z) {
 const beacons = [];
 const signs = [];
 const yardLamps = [];
+const cameras = [];
 
 // Concrete and hazard panel, both David M. Berry's own CC0 work out of NostOS.
 // A box has one set of UVs across every face, so the repeat has to be set per
@@ -1694,6 +1695,55 @@ function buildDatacentre() {
 
   signs.push(southMat, eastMat);
 
+  // SECURITY CAMERAS. A body on a bracket, tilted down at the yard, with a
+  // status lamp. The blink is deliberately slow: about one every three seconds,
+  // ramped rather than switched, and each camera on its own phase so they never
+  // pulse together. Photosensitive-seizure guidance puts the danger above three
+  // flashes a second; this is an order of magnitude under that and is meant to
+  // read as a thing idling, not as an alarm.
+  const camera = (x, y, z, yaw) => {
+    const cam = new THREE.Group();
+    const grey = (w2, h2, d2, col) => new THREE.Mesh(
+      new THREE.BoxGeometry(w2, h2, d2),
+      new THREE.MeshLambertMaterial({ color: col, flatShading: true }));
+
+    const bracket = grey(0.12, 0.12, 0.62, 0x4a4f54);
+    bracket.position.set(0, 0, 0.31);
+    cam.add(bracket);
+
+    const body = new THREE.Group();
+    body.position.set(0, -0.16, 0.78);
+    body.rotation.x = -0.34;                       // looking down at the apron
+    const shell = grey(0.30, 0.28, 0.62, 0xd8dcdf);
+    body.add(shell);
+    const hood = grey(0.34, 0.06, 0.40, 0xb2b7bb);
+    hood.position.set(0, 0.17, -0.06);
+    body.add(hood);
+    const lens = grey(0.16, 0.16, 0.06, 0x15181b);
+    lens.position.set(0, 0, -0.32);
+    body.add(lens);
+
+    const lampMat = new THREE.MeshLambertMaterial({
+      color: 0x50201c, emissive: new THREE.Color(0xff2a1c), emissiveIntensity: 0,
+    });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), lampMat);
+    lamp.position.set(0.10, 0.10, -0.31);
+    body.add(lamp);
+
+    cam.add(body);
+    cam.position.set(x, y, z);
+    cam.rotation.y = yaw;
+    cam.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    g.add(cam);
+    // Phase spread so no two are ever in step with each other.
+    cameras.push({ mat: lampMat, phase: cameras.length * 0.37 });
+  };
+
+  const camY = 1.6 + H * 0.80;
+  for (const cx of [-34, -12, 12, 34]) camera(cx, camY, D / 2 + 0.1, 0);
+  for (const cz of [-14, 10]) camera(W / 2 + 0.1, camY, cz, -Math.PI / 2);
+  for (const cz of [-10, 14]) camera(-W / 2 - 0.1, camY, cz, Math.PI / 2);
+
   // Yard lights. A working site is lit at night, and the apron is the one place
   // in this world with a reason to be. Poles with a head each, and a point light
   // that comes up as the daylight goes — no shadows from them, which is what
@@ -1949,8 +1999,15 @@ function startWind() {
 // thud with a bright scatter over it. Two layers rather than one, mixed anew
 // each step, and a random window into the noise so the texture never repeats.
 let footFlip = 1;
+let lastStepAt = -1;
 function footstep(onChalk, hard) {
   if (!wind || muted) return;
+  // TWO STEPS CANNOT LAND IN THE SAME EIGHTH OF A SECOND. The trigger reads the
+  // clip's phase, and the phase can jump — a rate change, or an action reset —
+  // which fires the wraparound branch again and again. Each firing builds four
+  // more Web Audio nodes, and a burst of them overlapping is the crackle.
+  if (wind.ctx.currentTime - lastStepAt < 0.11) return;
+  lastStepAt = wind.ctx.currentTime;
   const { ctx, stepBuf } = wind;
   const t0 = ctx.currentTime;
   const rnd = (a, b) => a + Math.random() * (b - a);
@@ -1963,15 +2020,17 @@ function footstep(onChalk, hard) {
   const dur = rnd(0.075, 0.155);
   const offset = Math.random() * Math.max(0.01, stepBuf.duration - 0.4);
 
-  let out = ctx.createGain();
+  const out = ctx.createGain();
   out.gain.value = 1;
+  let tail = out;
   if (ctx.createStereoPanner) {
     const pan = ctx.createStereoPanner();
     pan.pan.value = footFlip * rnd(0.04, 0.20);   // left foot, right foot
-    out.connect(pan); pan.connect(ctx.destination);
-  } else {
-    out.connect(ctx.destination);
+    out.connect(pan);
+    tail = pan;
   }
+  tail.connect(ctx.destination);
+  setTimeout(() => { out.disconnect(); if (tail !== out) tail.disconnect(); }, 900);
 
   const layer = (type, freq, q, gain, d) => {
     if (gain < 0.0004) return;
@@ -1988,6 +2047,9 @@ function footstep(onChalk, hard) {
     src.connect(f); f.connect(env); env.connect(out);
     src.start(t0, offset);
     src.stop(t0 + d + 0.04);
+    // And every node lets go of the graph when it is done. Left connected they
+    // accumulate for as long as you keep walking.
+    src.onended = () => { src.disconnect(); f.disconnect(); env.disconnect(); };
   };
 
   // The weight of it.
@@ -2372,6 +2434,17 @@ function frame(now) {
     // beacon, so it does not pulse.
     const lit = Math.pow(1 - daylight, 1.4) * 0.85;
     for (const m of signs) m.emissiveIntensity = lit;
+  }
+
+  if (cameras.length) {
+    // A third of a hertz, ramped up and down rather than switched. Well under
+    // any flash threshold, and it reads as a standby lamp instead of a strobe.
+    const t = now * 0.00033;
+    for (const c of cameras) {
+      const cycle = (t + c.phase) % 1;
+      const pulse = cycle < 0.16 ? Math.sin((cycle / 0.16) * Math.PI) : 0;
+      c.mat.emissiveIntensity = 0.10 + pulse * 0.90;
+    }
   }
 
   if (yardLamps.length) {
