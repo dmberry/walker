@@ -1,42 +1,114 @@
 # Walker — tasks
 
 Running list, kept in this file so nothing gets lost between sessions.
-Newest requests go to the bottom of **Open**. Move a line to **Done** with the
-date when it ships.
+
+**Numbering.** Every task has a permanent ID. IDs are assigned in the order
+tasks arrive, never reused, and never renumbered when something moves to Done —
+so `W-07` means the same thing in six months as it does today. Sub-tasks take a
+decimal (`W-06.3`). New work takes the next free number at the bottom of
+**Open**; the next free number is **W-15**.
 
 ## In progress
 
-- [ ] **The apron outside the door.** The strip of dark concrete between the
-      building and the fence still reads as solid black from inside. The hall
-      and the wider landscape are fixed; this one band is not.
-- [ ] **Terminal access point.** One rack in the hall gets a screen, and the
-      screen runs a simulated terminal. Basis: the laptop terminal from nostos,
-      copied in rather than rewritten.
+### W-06 · Terminal access point
+One machine in the hall gets a screen running a simulated terminal. Basis: the
+nostos laptop.
+
+- [x] **W-06.1** `src/console-buffer.js` — the console model, copied from nostos
+      unchanged apart from the header.
+- [x] **W-06.2** `src/unix.js` — the shell, rebuilt on the laptop's
+      architecture: `{d:{}}` / `{f:''}` nodes, `resolvePath`/`lookup`, a
+      `COMMANDS` table, pipes and `>` redirect, man pages on the disk. Neocloud's
+      own content, none of the Odyssey. Exercised: `cat … | grep … | wc`,
+      `ls -l`, `echo > file`, `man`, unknown command.
+- [x] **W-06.3** `src/terminal.js` — canvas renderer, scanlines, block caret at
+      1.4 Hz.
+- [ ] **W-06.4** Rewire `terminal.js` to `unix.js`; it still carries its own
+      first-pass shell.
+- [ ] **W-06.5** Put it in the world. `Prop_AccessPoint` from the MegaKit is a
+      0.44 × 0.47 × 1.3 m floor pedestal, 738 tris, and already has a screen
+      material (`M_Decal_Screen`) to swap the console canvas onto.
+- [ ] **W-06.6** Walk up, prompt, key to use, escape to leave.
+
+### W-07 · Share card
+Not previewing on Messages or WhatsApp. Cause: the card is a 600 × 315 **RGBA**
+PNG, and transparency plus the half-size format is a known failure on both.
+Redrawn at 1200 × 630 opaque JPEG (17 KB) in the browser but not yet written to
+disk or verified by eye.
+
+- [ ] **W-07.1** Save the new card, look at it, replace
+      `assets/brand/share-card.png`.
+- [ ] **W-07.2** Add `og:image:width`, `og:image:height`, `og:image:type`,
+      `og:site_name`, `og:image:alt`, `twitter:title`, `twitter:description`.
+- [ ] **W-07.3** Put the same tags on `tools/world-preview.html`. Today's
+      cache-busting `location.replace` in `index.html` runs before some crawlers
+      finish reading, so whichever page they land on needs a card.
+- [ ] **W-07.4** Keep the generator as `tools/share-card.html` so it can be
+      redrawn.
 
 ## Open
 
-- [ ] No climb or step-up clip exists in either the 13-clip glb or the 24-clip
-      source, so small hills are stepped over rather than climbed.
-- [ ] Only the male Adventurer is converted.
-- [ ] three.js is still 768 KB at runtime.
-- [ ] `character-preview.html` cannot run from the published site.
+- [ ] **W-08 · Doors that open as you walk in.** `Door_Metal` (2.11 × 4.05 m
+      leaf, 16 tris) and `Door_Frame_Square` (4.85 × 5.01) from the MegaKit.
+      Walker's opening is `DOOR_W 8` × `DOOR_H 5.2`, so two leaves in a scaled
+      frame.
+- [ ] **W-09 · The apron outside the door** still reads as solid black from
+      inside the hall. The room and the wider landscape are fixed; this band is
+      not.
+- [ ] **W-10 · A laptop for Walker to find.** At some point he picks one up, and
+      the nostos mechanics come across with it: `unix.js` proper (pipes,
+      redirect, `ed`/`pico`, man pages), the workspace, and a machine that is
+      *his* rather than bolted to a floor. The hall terminal (W-06) is
+      deliberately the smaller, fixed version of this — same console model
+      underneath, so the laptop is an extension and not a rewrite.
+- [ ] **W-11 · No climb or step-up clip** exists in either the 13-clip glb or
+      the 24-clip source, so small hills are stepped over rather than climbed.
+- [ ] **W-12 · Only the male Adventurer is converted.**
+- [ ] **W-13 · three.js is still 768 KB at runtime.**
+- [ ] **W-14 · `character-preview.html` cannot run from the published site.**
+
+## Asset notes
+
+**Modular SciFi MegaKit (Standard)** — `_tmp/`, CC0, Quaternius, same source as
+the nature pack already in the repo. 190 glTF models on a 4 m module grid.
+Worth pulling into the hall, in this order:
+
+| Piece | Size m | Tris | For |
+|---|---|---|---|
+| `Prop_AccessPoint` | 0.44 × 0.47 × 1.3 | 738 | the terminal (W-06.5) |
+| `Door_Metal` + `Door_Frame_Square` | 2.11 × 4.05 / 4.85 × 5.01 | 16 / 280 | doors that open (W-08) |
+| `Column_Large_Straight` | 1.4 × 10 × 1.96 | 924 | the 17 m hall has no columns |
+| `Decal_0`–`9`, `_A` `_K` `_V` `_X` `_Z`, `Decal_Line_Straight` | — | 2 each | row labels painted on the floor, matching `hall/inventory` in the terminal |
+| `Prop_Vent_Big` / `_Wide` | 2 × 0.07 × 1 | 328 / 208 | cold-aisle floor grilles |
+| `Prop_Fan_Small` | 1.68 × 0.44 × 1.68 | 434 | CRAC units — CRAC 4 has a bearing fault in the log |
+| `Prop_Rail_2/3/4` | up to 0.07 × 0.86 × 3.93 | 920 | aisle containment |
+| `Prop_Computer` | 0.74 × 1.59 × 0.56 | 519 | a second workstation |
+
+Skip the Aliens (wrong game) and most of the 84 Walls (a 4 m corridor kit; the
+hall shell is 168 m and already built).
+
+Import caveat: the kit shares four 2048² trim atlases and one model can pull ten
+images (`Column_Large_Straight` does). They need downsizing on the way in, the
+same as `tools/import-nature.py` does for the nature pack, and only the files
+actually loaded get copied out of `_tmp/`.
 
 ## Done
 
-- 2026-08-26 Interior lighting. Indoors the sun, the sky and every yard lamp
-  were switched off, so nothing beyond the door had any light on it at all. The
-  sky now dims to a floor value instead of switching off, and the hall's own
-  fill is up: hemisphere 0.55 -> 1.75, lamps 64 -> 128.
-- 2026-08-26 Rack faces are an atlas, six cabinets by six lamp states. Every
-  cabinet used to be the same cabinet lamp for lamp, and a blink was the whole
-  panel tinting light or dark. A per-instance cell picks one of thirty-six, the
-  layout half fixed and the frame half stepped on a timer, so a blink moves a
-  handful of five-pixel lamps. Blue and cyan are now 79 per cent of lamps and
-  red 2.5. Blink floor 620 ms (1.6 Hz), under WCAG 2.3.1's three a second.
-
-- 2026-08-26 Cache-busting entry page. Pages sends `cache-control: max-age=600`
-  and a real header beats the `<meta http-equiv>`, so pushes took ten minutes to
-  appear. `index.html` now redirects to a timestamped URL.
-- 2026-08-26 Stamina drain 19/s → 6.5/s. Fifteen seconds flat out, about 170 m.
-- 2026-08-26 Thinner bezel round the rack faces: the panel went from
-  1.05 x 2.10 to 1.34 x 2.26 on a 1.45 x 2.35 cabinet.
+- [x] **W-05** 2026-08-26 **Rack lamps.** Every cabinet was the same cabinet
+      lamp for lamp, and a blink was the whole panel tinting light or dark. The
+      face is an atlas now, six cabinets by six lamp states; a per-instance cell
+      picks one of the thirty-six, layout fixed, frame stepped on the cabinet's
+      own timer. Blue and cyan are 79 per cent of lamps, red 2.5. Five lamps in
+      eight never blink. Blink floor 620 ms (1.6 Hz), under WCAG 2.3.1's three.
+- [x] **W-04** 2026-08-26 **Interior lighting.** Indoors the sun, the sky and
+      every yard lamp were switched off, so nothing beyond the door had any
+      light on it. The sky now dims to a floor value instead of going out; hall
+      fill 0.55 → 1.75, lamps 64 → 128.
+- [x] **W-03** 2026-08-26 **Rack bezel** down from 20 cm to 5, which is what a
+      rack frame is.
+- [x] **W-02** 2026-08-26 **Cache-busting entry page.** Pages sends
+      `cache-control: max-age=600` and a real header beats the
+      `<meta http-equiv>`, so pushes took ten minutes to show. `index.html`
+      redirects to a timestamped URL.
+- [x] **W-01** 2026-08-26 **Stamina** drain 19/s → 6.5/s. Fifteen seconds flat
+      out, ~170 m.
