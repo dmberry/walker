@@ -482,8 +482,11 @@ function applyLight() {
   scene.fog.color.copy(tmpCol);
 
   // The room's own lighting, which only runs while you are in it.
+  // Point lamps get their level from the flicker each frame; this only has to
+  // switch them off when you leave, and carry the ambient.
   for (const l of interiorLights) {
-    l.intensity = indoors ? (l.isHemisphereLight ? 0.55 : 26) : 0;
+    if (l.isHemisphereLight) l.intensity = indoors ? 0.55 : 0;
+    else if (!indoors) l.intensity = 0;
   }
 }
 
@@ -750,6 +753,16 @@ const trackPts = TRACKS.flat();
 // Nothing grows in a path. Used to keep tufts, trees and rocks off them.
 function onYard(x, z) {
   return Math.abs(x - DC.x) < DC.w / 2 + 20 && Math.abs(z - DC.z) < DC.d / 2 + 20;
+}
+
+// NOTHING GROWS ON CONCRETE. Every scatter asks this, rather than each one
+// carrying its own list of exclusions — which is how trees came to be standing
+// on the yard: the rock, undergrowth and tuft loops each checked the yard and
+// the tree loop did not.
+function plantable(x, z, pad) {
+  if (onYard(x, z)) return false;
+  if (onTrack(x, z, pad)) return false;
+  return true;
 }
 
 function onTrack(x, z, pad) {
@@ -1387,7 +1400,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   for (let tries = 0; tries < 6000 && canopies.length < 34; tries++) {
     const a = scatter() * Math.PI * 2, d = 16 + scatter() * 58;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (onTrack(x, z, 2.0)) continue;
+    if (!plantable(x, z, 2.0)) continue;
     const h = 5.6 + scatter() * 4.2;
     const r = h * 0.24;
     let clear = true;
@@ -1407,7 +1420,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   for (let i = 0; i < 46; i++) {
     const a = scatter() * Math.PI * 2, d = 9 + scatter() * 62;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (onTrack(x, z, 0.9) || onYard(x, z)) continue;
+    if (!plantable(x, z, 0.9)) continue;
     if (canopies.some(c => (x - c.x) ** 2 + (z - c.z) ** 2 < (c.r * 0.5) ** 2)) continue;
     const src = lib.get(ROCK_MODELS[(scatter() * ROCK_MODELS.length) | 0]);
     if (!src) continue;
@@ -1451,7 +1464,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   for (let i = 0; i < 90; i++) {
     const a = scatter() * Math.PI * 2, d = 9 + scatter() * 40;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
-    if (onTrack(x, z, 0.7) || onYard(x, z)) continue;
+    if (!plantable(x, z, 0.7)) continue;
     const src = lib.get(UNDER_MODELS[(scatter() * UNDER_MODELS.length) | 0]);
     if (!src) continue;
     plant(src, x, z, 0.35 + scatter() * 0.55, scatter() * Math.PI * 2);
@@ -1608,13 +1621,15 @@ const dcNear = new THREE.Group();     // the two walls the camera looks through
 const dcInterior = new THREE.Group();
 const dcGhost = new THREE.Group();   // the near walls, as a hint, only indoors
 const exitGlow = [];
+const doorLeaves = [];
+let doorOpen = 0;      // 0 shut, 1 wide
 let ledMesh = null, ledCount = 0;
 // Beside ledMesh, not beside the other per-frame state: buildDatacentre() fills
 // these and runs long before that section is reached.
 let ledNext = null;      // earliest time each cabinet may change again
 let ledPeriod = null;    // and how long it waits, which differs per cabinet
 const ledCol = new THREE.Color();
-const stripMats = [];
+const flickerLights = [];
 
 const DOOR_W = 8, DOOR_H = 5.2;
 
@@ -1725,10 +1740,41 @@ function buildDatacentre() {
   }
   put(box(DOOR_W, H - DOOR_H, T, wallCol, 5), 0, base + DOOR_H + (H - DOOR_H) / 2, D / 2, false, dcNear);
   // A frame around the opening, so it reads as a door and not as damage.
+  //
+  // PROUD OF THE WALL, NOT IN IT. At z = D/2 the jambs were exactly coplanar
+  // with the wall segments beside them and the two surfaces fought for the
+  // depth buffer — which is the striping down the left post. Moved forward and
+  // made shallower so no two faces share a plane.
   for (const sgn of [-1, 1]) {
-    put(box(0.5, DOOR_H + 0.5, T + 0.5, 0x5d6167, 0), sgn * (DOOR_W / 2 + 0.25), base + (DOOR_H + 0.5) / 2, D / 2, false, dcNear);
+    put(box(0.42, DOOR_H + 0.6, T * 0.8, 0x5d6167, 0),
+        sgn * (DOOR_W / 2 + 0.21), base + (DOOR_H + 0.6) / 2, D / 2 + 0.34, false, dcNear);
   }
-  put(box(DOOR_W + 1.4, 0.5, T + 0.5, 0x5d6167, 0), 0, base + DOOR_H + 0.25, D / 2, false, dcNear);
+  put(box(DOOR_W + 1.3, 0.42, T * 0.8, 0x5d6167, 0),
+      0, base + DOOR_H + 0.21, D / 2 + 0.34, false, dcNear);
+
+  // ---- doors that open ------------------------------------------------------
+  // Two leaves that part as you come up to them. They carry no collision of
+  // their own: the doorway is already a gap in the wall's blockers, and a leaf
+  // that closed on you would be a way to get stuck in a wall.
+  {
+    const leafMat = new THREE.MeshLambertMaterial({
+      color: 0x2b333c, metalness: undefined, flatShading: true,
+    });
+    for (const sgn of [-1, 1]) {
+      const leaf = new THREE.Mesh(
+        new THREE.BoxGeometry(DOOR_W / 2 + 0.05, DOOR_H - 0.12, 0.16), leafMat);
+      leaf.castShadow = leaf.receiveShadow = true;
+      leaf.position.set(sgn * DOOR_W / 4, base + (DOOR_H - 0.12) / 2, D / 2 + 0.12);
+      // A pale band across each leaf, the way every service door has one.
+      const band = new THREE.Mesh(
+        new THREE.BoxGeometry(DOOR_W / 2 + 0.06, 0.14, 0.2),
+        new THREE.MeshLambertMaterial({ color: 0xb9c2c9, flatShading: true }));
+      band.position.set(0, -DOOR_H * 0.16, 0);
+      leaf.add(band);
+      dcNear.add(leaf);
+      doorLeaves.push({ mesh: leaf, home: sgn * DOOR_W / 4, sgn });
+    }
+  }
 
   // Wall collision, with the doorway left open.
   const wallTop = heightAt(DC.x, DC.z) + base + H;
@@ -1819,7 +1865,10 @@ function buildDatacentre() {
   // objects and the frame would die. They cast and receive nothing — the
   // interior is lit by its own strips and by the LEDs, and a shadow pass over
   // this many boxes would cost more than everything else together.
-  const rackGeo = new THREE.BoxGeometry(0.62, 2.2, 1.15);
+  // SHORTER THAN HIM. At 2.2 the cabinets stood over the figure and you could
+  // not see across the floor; 1.62 is just under his 1.75, so he reads as the
+  // tallest thing in the room and the rows read as rows.
+  const rackGeo = new THREE.BoxGeometry(0.62, 1.62, 1.15);
   const rackMat = new THREE.MeshLambertMaterial({ color: 0x14181d, flatShading: true });
   // A CABINET IS A STACK OF MACHINES, and it should look like one. The column
   // is right at a distance but it was a single unbroken bar; what a rack
@@ -1831,32 +1880,57 @@ function buildDatacentre() {
   // face — so every cabinet still blinks on its own, and the structure inside
   // it costs nothing. Fifty thousand individual lamps would be the alternative.
   const faceTex = (() => {
-    const W2 = 96, H2 = 320, U = 22;              // U: one rack unit, in pixels
+    // U doubled: seven machines to a cabinet rather than fourteen, so each one
+    // reads as a machine and not as a stripe.
+    const W2 = 96, H2 = 320, U = 44;              // U: one rack unit, in pixels
     const cv = document.createElement('canvas');
     cv.width = W2; cv.height = H2;
     const c = cv.getContext('2d');
-    c.fillStyle = '#05070b';
+    // MOSTLY BLACK. The first version lit the whole face and the hall read as
+    // stacked light boxes; a rack front is dark steel and what you actually see
+    // of it across a room is the lamps. The colours are baked in here rather
+    // than tinted per instance, because a cabinet has blue and amber and red on
+    // it at once and one instance colour can only ever be one hue.
+    c.fillStyle = '#04060a';
     c.fillRect(0, 0, W2, H2);
+    const LAMP = [
+      ['rgba(120,190,255,', 0.46],   // blue, the common one
+      ['rgba(140,230,255,', 0.20],   // cyan
+      ['rgba(240,248,255,', 0.16],   // white
+      ['rgba(255,168,60,',  0.12],   // amber
+      ['rgba(255,74,52,',   0.06],   // red
+    ];
+    const pick = () => {
+      let r = rand();
+      for (const [c2, w] of LAMP) { if ((r -= w) <= 0) return c2; }
+      return LAMP[0][0];
+    };
     for (let y = 4; y + U < H2; y += U + 3) {
-      // The lit face of one machine. Kept pale, because the instance colour is
-      // what makes it blue — a blue texture would multiply to almost nothing.
-      const v = 150 + rand() * 70 | 0;
-      c.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
-      c.fillRect(7, y, W2 - 14, U - 4);
-      // A darker inset, so the unit has a front and not just an outline.
-      c.fillStyle = 'rgba(10,14,20,0.55)';
-      c.fillRect(11, y + 3, W2 - 22, U - 10);
-      // Its indicators: a short run of small lamps, a few of them brighter.
+      // The machine's own face: near black, with just enough edge to separate
+      // it from the one above.
+      const v = 12 + rand() * 10 | 0;
+      c.fillStyle = 'rgb(' + v + ',' + (v + 2) + ',' + (v + 5) + ')';
+      c.fillRect(6, y, W2 - 12, U - 4);
+      c.fillStyle = 'rgba(90,110,135,0.18)';
+      c.fillRect(6, y, W2 - 12, 1);
+
+      // Indicators: a short run on the left, small and bright.
       for (let k = 0; k < 5; k++) {
-        const bright = rand();
-        c.fillStyle = bright > 0.72 ? '#ffffff'
-                    : bright > 0.3 ? 'rgba(235,245,255,0.75)'
-                    : 'rgba(120,140,165,0.45)';
-        c.fillRect(15 + k * 7, y + 5, 4, 4);
+        if (rand() < 0.18) continue;              // not every socket is filled
+        c.fillStyle = pick() + (0.55 + rand() * 0.45).toFixed(2) + ')';
+        c.fillRect(13 + k * 8, y + 10, 5, 7);
       }
-      // And the drive bays down the right, which is most of what you see.
-      c.fillStyle = 'rgba(215,232,250,0.55)';
-      c.fillRect(W2 - 30, y + 5, 16, U - 13);
+      // Drive bays down the right: a column of small lamps, mostly blue.
+      for (let k = 0; k < 6; k++) {
+        if (rand() < 0.30) continue;
+        c.fillStyle = pick() + (0.40 + rand() * 0.50).toFixed(2) + ')';
+        c.fillRect(W2 - 38 + k * 6, y + 12, 4, 5);
+      }
+      // And now and then a unit that is properly awake.
+      if (rand() < 0.10) {
+        c.fillStyle = pick() + '0.85)';
+        c.fillRect(13, y + 26, W2 - 28, 3);
+      }
     }
     const t = new THREE.CanvasTexture(cv);
     t.colorSpace = THREE.SRGBColorSpace;
@@ -1864,7 +1938,7 @@ function buildDatacentre() {
     return t;
   })();
 
-  const ledGeo = new THREE.PlaneGeometry(0.42, 1.78);
+  const ledGeo = new THREE.PlaneGeometry(0.42, 1.40);
   const ledMat = new THREE.MeshBasicMaterial({ map: faceTex, toneMapped: false });
 
   // TWO KINDS OF GAP. The aisles between rows are for reaching the cabinets;
@@ -1893,23 +1967,25 @@ function buildDatacentre() {
   const col = new THREE.Color();
   for (let i = 0; i < ledCount; i++) {
     const [x, z] = spots[i];
-    m4.position.set(x, base + 1.1, z);
+    m4.position.set(x, base + 0.81, z);
     m4.rotation.set(0, 0, 0);
     m4.updateMatrix();
     racks.setMatrixAt(i, m4.matrix);
     // The face panel, turned to look down the aisle.
-    m4.position.set(x, base + 1.12, z + 0.60);
+    m4.position.set(x, base + 0.86, z + 0.60);
     m4.rotation.set(0, 0, 0);
     m4.updateMatrix();
     ledMesh.setMatrixAt(i, m4.matrix);
-    col.setHSL(0.55 + rand() * 0.05, 0.92, 0.30 + rand() * 0.24);
+    // Brightness, near enough white: the hue is in the texture now, and tinting
+    // would drag every lamp on the cabinet to the same colour.
+    col.setHSL(0.58, 0.06, 0.62 + rand() * 0.34);
     ledMesh.setColorAt(i, col);
   }
   // ONE BLOCKER PER ROW, not one per cabinet. blocked() is a linear scan, so
   // four thousand of them would be four thousand tests three times a frame; a
   // row is a continuous line of steel anyway and a rectangle says so exactly.
   {
-    const rowTop = heightAt(DC.x, DC.z) + base + 2.2;
+    const rowTop = heightAt(DC.x, DC.z) + base + 1.62;
     for (const r of runs) {
       blockers.push({ x: DC.x + (r.x0 + r.x1) / 2, z: DC.z + r.z,
                       hw: (r.x1 - r.x0) / 2, hd: 0.62, top: rowTop });
@@ -1928,22 +2004,20 @@ function buildDatacentre() {
   }
   dcInterior.add(racks, ledMesh);
 
-  // ---- overhead, and the light that makes it feel wrong ---------------------
-  // Long dim strips down the aisles, a couple of them failing. Nothing here is
-  // daylight: inside, the exterior sun is turned right down and what is left is
-  // this, which is the whole point of the room.
-  for (let z = -D / 2 + 9; z < D / 2 - 9; z += 7.4) {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xcfe6f4, toneMapped: false });
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(W - 20, 0.16, 0.34), mat);
-    strip.position.set(0, base + H - 1.6, z);
-    dcInterior.add(strip);
-    stripMats.push({ mat, phase: rand() * 6.28, bad: rand() < 0.22 });
-  }
-  for (let i = -2; i <= 2; i++) {
+  // ---- the light that makes it feel wrong ----------------------------------
+  // NO VISIBLE STRIP LIGHTS. They were there, long bars at ceiling height — and
+  // the moment the roof comes off they lie straight across the view between the
+  // camera and the floor, which is no use to anybody. The room is lit by lamps
+  // that are simply not drawn, and the flicker that used to be on the strips is
+  // on the lamps instead, where it does the same work and is not in the way.
+  for (let i = -3; i <= 3; i++) {
     const l = new THREE.PointLight(0x6f9fd8, 0, 86, 1.5);
-    l.position.set(i * (W / 5.5), base + H - 3.2, 0);
+    l.position.set(i * (W / 7.5), base + H - 4.0, 0);
     dcInterior.add(l);
     interiorLights.push(l);
+    // A couple of them are failing. Slow — a third of a hertz — so it reads as
+    // a tube on its way out and never as a strobe.
+    flickerLights.push({ light: l, phase: rand() * 6.28, bad: rand() < 0.28, base: 26 });
   }
   const amb = new THREE.HemisphereLight(0x2a4560, 0x0a1119, 0);
   dcInterior.add(amb);
@@ -3185,6 +3259,17 @@ function frame(now) {
   // BURNS. Standing in it costs you steadily rather than all at once, and the
   // flinch is on its own timer — playing HitRecieve every frame would restart
   // the clip sixty times a second, which is the stutter the stamina gate taught.
+  // The doors. Open on approach, and stay open while you are inside so you are
+  // not walking at a shut door every time you want to leave.
+  if (doorLeaves.length) {
+    const dxd = pos.x - DC.x, dzd = pos.z - (DC.z + DC.d / 2);
+    const near = indoors || (dxd * dxd + dzd * dzd) < 9 * 9;
+    doorOpen += ((near ? 1 : 0) - doorOpen) * Math.min(1, dt * 4.5);
+    for (const l of doorLeaves) {
+      l.mesh.position.x = l.home + l.sgn * doorOpen * (DOOR_W / 2 + 0.1);
+    }
+  }
+
   // Hysteresis: a metre and a half inside to enter, half a metre outside to
   // leave, so the doorway is a threshold and not a switch.
   setIndoors(indoors ? insideDC(pos.x, pos.z, 0.5) : insideDC(pos.x, pos.z, -1.5));
@@ -3209,12 +3294,10 @@ function frame(now) {
       const roll = Math.random();
       // Mostly the steady green of something idling, occasionally amber, and
       // very rarely the red that makes you look twice.
-      // Blue is the room. Amber and red exist only to be noticed, which they
-      // cannot be if there are many of them.
-      if (roll < 0.90) ledCol.setHSL(0.55 + Math.random() * 0.05, 0.92, 0.26 + Math.random() * 0.34);
-      else if (roll < 0.965) ledCol.setHSL(0.52, 0.55, 0.62 + Math.random() * 0.22);
-      else if (roll < 0.992) ledCol.setHSL(0.11, 0.88, 0.30 + Math.random() * 0.18);
-      else ledCol.setHSL(0.01, 0.90, 0.32 + Math.random() * 0.16);
+      // A cabinet brightens and dims; it does not change colour. Occasionally
+      // one drops right down, which is a machine going quiet.
+      if (roll < 0.14) ledCol.setHSL(0.58, 0.06, 0.22 + Math.random() * 0.18);
+      else ledCol.setHSL(0.58, 0.06, 0.58 + Math.random() * 0.42);
       ledMesh.setColorAt(i, ledCol);
     }
     ledMesh.instanceColor.needsUpdate = true;
@@ -3225,12 +3308,13 @@ function frame(now) {
       exitGlow[i].opacity = (i === 0 ? 0.11 : 0.20) + b * (i === 0 ? 0.10 : 0.16);
     }
 
-    // A couple of the strips are on their way out. Slow, and never a strobe.
+    // The failing lamps. 2.3 rad/s is 0.37 Hz, well inside the three-a-second
+    // line, and it is a dip rather than a switch.
     const t = now * 0.001;
-    for (const s2 of stripMats) {
-      const base2 = 0.42 + 0.06 * Math.sin(t * 0.7 + s2.phase);
-      const fail = s2.bad ? (Math.sin(t * 2.3 + s2.phase) > 0.72 ? 0.16 : 1) : 1;
-      s2.mat.color.setRGB(0.72 * base2 * fail, 0.86 * base2 * fail, 0.98 * base2 * fail);
+    for (const f of flickerLights) {
+      const drift = 0.88 + 0.12 * Math.sin(t * 0.7 + f.phase);
+      const fail = f.bad ? (Math.sin(t * 2.3 + f.phase) > 0.72 ? 0.22 : 1) : 1;
+      f.light.intensity = f.base * drift * fail;
     }
   }
 
