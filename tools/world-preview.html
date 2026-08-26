@@ -3356,7 +3356,13 @@ canvas.addEventListener('mousedown', e => {
       -((e.clientY - r.top) / r.height) * 2 + 1), cam());
     if (termRay.intersectObjects(termClickables, false).length) { openTerm(); return; }
   }
-  play(stance === 'gun' ? 'Gun_Shoot' : 'Sword_Slash', true, 0.08);
+  // UNARMED, A CLICK IS A POINT, NOT A PUNCH. Swinging an invisible sword at
+  // every click read as a glitch; the Interact clip is a reach toward the thing
+  // in front of him, which is what a click means. The weapons keep their
+  // strikes, and the mobile HIT button stays a hit — it says so on it.
+  play(stance === 'gun' ? 'Gun_Shoot'
+     : stance === 'sword' ? 'Sword_Slash'
+     : 'Interact', true, 0.08);
 });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
