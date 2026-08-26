@@ -1725,11 +1725,10 @@ function buildDatacentre() {
     body.rotation.x = -0.34;                     // both types look downward
     u.add(body);
 
-    const lampMat = new THREE.MeshLambertMaterial({
-      color: 0x50201c, emissive: new THREE.Color(0xff2a1c), emissiveIntensity: 0,
-    });
-    const pilot = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), lampMat);
-
+    // Only the cameras carry a red pilot. A floodlight has nothing to report and
+    // no reason to blink; giving it one made the whole wall twitch and blurred
+    // the difference between the thing watching you and the thing lighting the
+    // name.
     if (litTarget) {
       body.add(part(0.46, 0.22, 0.36, 0xc6cbcf));
       const glassMat = new THREE.MeshLambertMaterial({
@@ -1738,9 +1737,6 @@ function buildDatacentre() {
       const glass = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.28), glassMat);
       glass.position.set(0, -0.13, 0);
       body.add(glass);
-      pilot.position.set(0.20, 0.06, -0.10);
-      body.add(pilot);
-
       // No shadows from these: four shadow-casting cones would cost more than
       // the rest of the frame and nothing would be seen to.
       const spot = new THREE.SpotLight(0xdfeaf2, 0, 24, 0.60, 0.78, 1.4);
@@ -1759,11 +1755,15 @@ function buildDatacentre() {
       const lens = part(0.16, 0.16, 0.06, 0x15181b);
       lens.position.set(0, 0, -0.32);
       body.add(lens);
+      const lampMat = new THREE.MeshLambertMaterial({
+        color: 0x50201c, emissive: new THREE.Color(0xff2a1c), emissiveIntensity: 0,
+      });
+      const pilot = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), lampMat);
       pilot.position.set(0.10, 0.10, -0.31);
       body.add(pilot);
+      pilots.push({ mat: lampMat, phase: pilots.length * 0.31 });
     }
 
-    pilots.push({ mat: lampMat, phase: pilots.length * 0.31 });
     u.position.set(x, y, z);
     u.rotation.y = yaw;
     u.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
