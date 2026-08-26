@@ -2369,6 +2369,12 @@ function buildDatacentre(spec) {
   // Two numbers per cabinet: which frame it is showing, and which cabinet it is.
   ledFrame = new Float32Array(ledCount * 2);
   ledAttr = new THREE.InstancedBufferAttribute(ledFrame, 2);
+  // DECLARED DYNAMIC, and only uploaded when a lamp actually moved. This
+  // buffer was flagged needsUpdate every frame indoors whether the blink loop
+  // had touched it or not, and it was left at StaticDraw. Chrome shrugs at
+  // re-uploading a static buffer mid-frame; Safari's GL is within its rights
+  // not to, and the rack lamps flickered there and nowhere else.
+  ledAttr.setUsage(THREE.DynamicDrawUsage);
   ledGeo.setAttribute('aCell', ledAttr);
 
   const racks = new THREE.InstancedMesh(rackGeo, rackMat, ledCount);
@@ -4144,6 +4150,7 @@ function frame(now) {
     // seconds. What changes is a handful of five-pixel lamps, scattered across
     // the hall, so neither the rate nor the flashing area comes near the
     // threshold.
+    let ledDirty = false;
     for (let n = 0; n < 90; n++) {
       const i = (Math.random() * ledCount) | 0;
       if (now < ledNext[i]) continue;
@@ -4151,8 +4158,9 @@ function frame(now) {
       // Move to a DIFFERENT pattern, never a freshly random one: landing on the
       // frame you are already showing is a blink that does not blink.
       ledFrame[i * 2] = (ledFrame[i * 2] + 1 + (Math.random() * (FRAMES - 1) | 0)) % FRAMES;
+      ledDirty = true;
     }
-    ledAttr.needsUpdate = true;
+    if (ledDirty) ledAttr.needsUpdate = true;
 
     // The exit breathes, slowly. A steady rectangle reads as scenery.
     for (let i = 0; i < exitGlow.length; i++) {
