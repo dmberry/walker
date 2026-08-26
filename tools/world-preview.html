@@ -452,7 +452,7 @@ scene.add(rim);
 // the clock, so the rate and the pause are the same key rather than two.
 const DAY_LENGTHS = [1200, 2700, 420];                     // 20 min, 45, 7
 let dayIdx = 0;
-const SUN_TILT = THREE.MathUtils.degToRad(30);             // how far the arc leans
+const SUN_TILT = THREE.MathUtils.degToRad(11);             // how far the arc leans
 // Just before the sun clears the horizon, so the day opens on it coming up.
 let tod = 0.245;                                           // 05:53
 let daylight = 0;      // 0 at night, 1 in full day; the readouts follow it too
@@ -472,11 +472,16 @@ const tmpCol = new THREE.Color();
 function sunAt(t) {
   // 0 at sunrise, PI at sunset, negative y through the night.
   const a = (t - 0.25) * Math.PI * 2;
-  // THE ARC LEANS SOUTH. It leaned north to begin with, which put the midday sun
-  // behind the datacentre's south face — the one the isometric camera always
-  // looks at — so the wall, its sign and the yard in front of it were in shade
-  // from dawn to dusk and read as black. In the northern hemisphere the sun is
-  // to the south at noon, and +Z is south here.
+  // EAST TO WEST, ACROSS THE TOP. +X is east here and +Z is south, so the track
+  // runs +X at sunrise, through +Z at noon, to -X at sunset — which is the right
+  // order and always was. What was wrong was how far it leaned out of it: at 30
+  // degrees the sun spent the middle of the day well down in the south and the
+  // whole arc read as a swing sideways rather than a passage overhead.
+  //
+  // At 11 degrees it goes over the top. The lean is still there, and still in
+  // the right direction — it has to be, or the datacentre's south face is the
+  // one the isometric camera always looks at and would sit in shade from dawn to
+  // dusk, which is how it came to read as black in the first place.
   sunDir.set(Math.cos(a), Math.sin(a) * Math.cos(SUN_TILT), Math.sin(a) * Math.sin(SUN_TILT))
         .normalize();
   return sunDir;
@@ -2401,7 +2406,11 @@ function buildDatacentre() {
     }
     put(box(1.6, H - 2.6, 0.7, 0xc9ced2, 4), x, base + H / 2, -D / 2 - 0.6, false);
   }
-  for (let i = -5; i <= 5; i++) {
+  // NINE, NOT ELEVEN. The row ran to z = +/-57.5 and the fence stands at 53, so
+  // the end unit of each pair sat outside its own compound on the grass. Four
+  // either side puts the last one at 46, clear of the line with its 4 m half
+  // depth to spare.
+  for (let i = -4; i <= 4; i++) {
     put(box(5.4, 4.2, 8.0, 0xd2d7da, 2.2), -W / 2 - 7.0, APRON_H + 2.1, i * 11.5);
     const hm = new THREE.MeshLambertMaterial({ color: 0xffffff, map: siteClone(TEX_HAZARD) });
     hm.map.repeat.set(3.2, 0.4);
