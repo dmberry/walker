@@ -477,7 +477,7 @@ function applyLight() {
   rim.intensity = (0.12 + day * 0.46) * inside;
 
   tmpCol.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_LOW, low * 0.75);
-  if (indoors) tmpCol.setHex(0x070c11);
+  if (indoors) tmpCol.setHex(0x060a12);
   scene.background.copy(tmpCol);
   scene.fog.color.copy(tmpCol);
 
@@ -1606,6 +1606,8 @@ const TEX_SLAB = (() => {
 const dcRoof = new THREE.Group();     // stripped away indoors
 const dcNear = new THREE.Group();     // the two walls the camera looks through
 const dcInterior = new THREE.Group();
+const dcGhost = new THREE.Group();   // the near walls, as a hint, only indoors
+const exitGlow = [];
 let ledMesh = null, ledCount = 0;
 const stripMats = [];
 
@@ -1654,13 +1656,13 @@ function buildDatacentre() {
     const N = 512, cv = document.createElement('canvas');
     cv.width = cv.height = N;
     const c = cv.getContext('2d');
-    c.fillStyle = '#6a6f74';
+    c.fillStyle = '#9aa1a8';
     c.fillRect(0, 0, N, N);
     // Four tiles across the texture, each with its own slight cast, because a
     // raised floor is panels and panels never match.
     for (let i = 0; i < 4; i++) {
       for (let j = 0; j < 4; j++) {
-        const v = 96 + rand() * 26 | 0;
+        const v = 150 + rand() * 28 | 0;
         c.fillStyle = 'rgb(' + v + ',' + (v + 3) + ',' + (v + 7) + ')';
         c.fillRect(i * N / 4 + 2, j * N / 4 + 2, N / 4 - 4, N / 4 - 4);
       }
@@ -1672,10 +1674,19 @@ function buildDatacentre() {
       c.beginPath(); c.moveTo(i * N / 4, 0); c.lineTo(i * N / 4, N); c.stroke();
       c.beginPath(); c.moveTo(0, i * N / 4); c.lineTo(N, i * N / 4); c.stroke();
     }
-    c.fillStyle = 'rgba(18,22,26,0.55)';
-    for (let i = 0; i < 900; i++) {
-      c.fillRect(rand() * N, rand() * N, 2, 2);
+    // One panel in four is a grate, which is where the cold air comes up.
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        if (rand() > 0.28) continue;
+        const ox = i * N / 4, oy = j * N / 4;
+        c.fillStyle = 'rgba(30,36,42,0.80)';
+        for (let a = 10; a < N / 4 - 10; a += 9) {
+          for (let b = 10; b < N / 4 - 10; b += 9) c.fillRect(ox + a, oy + b, 5, 5);
+        }
+      }
     }
+    c.fillStyle = 'rgba(60,68,76,0.35)';
+    for (let i = 0; i < 700; i++) c.fillRect(rand() * N, rand() * N, 2, 2);
     const t = new THREE.CanvasTexture(cv);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.colorSpace = THREE.SRGBColorSpace;
@@ -1736,6 +1747,67 @@ function buildDatacentre() {
   g.add(dcRoof);
   g.add(true, dcNear);
 
+  // ---- the way out ----------------------------------------------------------
+  // Taking the near walls away is what lets you see in, and it also takes away
+  // any clue where the door was. What is left in their place is a ghost: the
+  // walls as a barely-there plane so you know where the room ends, and the
+  // opening picked out brightly enough to walk towards.
+  {
+    const ghostMat = () => new THREE.MeshBasicMaterial({
+      color: 0x9fc4dc, transparent: true, opacity: 0.055,
+      side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+    });
+    const gs = new THREE.Mesh(new THREE.PlaneGeometry(W, H), ghostMat());
+    gs.position.set(0, base + H / 2, D / 2);
+    dcGhost.add(gs);
+    const ge = new THREE.Mesh(new THREE.PlaneGeometry(D, H), ghostMat());
+    ge.rotation.y = Math.PI / 2;
+    ge.position.set(W / 2, base + H / 2, 0);
+    dcGhost.add(ge);
+
+    // The opening itself, and a bar of light on the floor across it. Both go in
+    // exitGlow so they can breathe rather than sit flat — a steady rectangle
+    // reads as scenery, a slow pulse reads as a way out.
+    const doorMat = new THREE.MeshBasicMaterial({
+      color: 0x8ff0c0, transparent: true, opacity: 0.16,
+      side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+    });
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W, DOOR_H), doorMat);
+    door.position.set(0, base + DOOR_H / 2, D / 2 - 0.05);
+    dcGhost.add(door);
+    exitGlow.push(doorMat);
+
+    const sillMat = new THREE.MeshBasicMaterial({
+      color: 0x8ff0c0, transparent: true, opacity: 0.28,
+      depthWrite: false, toneMapped: false,
+    });
+    const sill = new THREE.Mesh(new THREE.PlaneGeometry(DOOR_W, 3.2), sillMat);
+    sill.rotation.x = -Math.PI / 2;
+    sill.position.set(0, base + 0.04, D / 2 - 1.8);
+    dcGhost.add(sill);
+    exitGlow.push(sillMat);
+
+    // And the word, because every room like this has one.
+    const cv = document.createElement('canvas');
+    cv.width = 256; cv.height = 64;
+    const c2 = cv.getContext('2d');
+    c2.fillStyle = '#0d1a14';
+    c2.fillRect(0, 0, 256, 64);
+    c2.fillStyle = '#8ff0c0';
+    c2.font = '600 34px ui-sans-serif, Helvetica, Arial, sans-serif';
+    c2.textAlign = 'center';
+    c2.textBaseline = 'middle';
+    c2.fillText('E X I T', 128, 34);
+    const t2 = new THREE.CanvasTexture(cv);
+    t2.colorSpace = THREE.SRGBColorSpace;
+    const signM = new THREE.MeshBasicMaterial({ map: t2, transparent: true, toneMapped: false });
+    const exitSign = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.8), signM);
+    exitSign.position.set(0, base + DOOR_H + 0.9, D / 2 - 0.1);
+    dcGhost.add(exitSign);
+  }
+  dcGhost.visible = false;
+  g.add(dcGhost);
+
   // ---- the racks ------------------------------------------------------------
   // FOUR THOUSAND CABINETS IN TWO DRAW CALLS. One InstancedMesh for the bodies
   // and one for the light strips; individually they would be four thousand
@@ -1743,17 +1815,27 @@ function buildDatacentre() {
   // interior is lit by its own strips and by the LEDs, and a shadow pass over
   // this many boxes would cost more than everything else together.
   const rackGeo = new THREE.BoxGeometry(0.62, 2.2, 1.15);
-  const rackMat = new THREE.MeshLambertMaterial({ color: 0x23282d, flatShading: true });
-  // Small. At 0.42 x 1.5 the panels touched each other down the row and the
-  // hall read as a wall of colour rather than as cabinets with lights on them;
-  // what makes it look like a datacentre is the dark between them.
-  const ledGeo = new THREE.PlaneGeometry(0.24, 0.78);
+  const rackMat = new THREE.MeshLambertMaterial({ color: 0x14181d, flatShading: true });
+  // A COLUMN, NOT A SCATTER OF DOTS. What reads in a real hall is the full
+  // height of each cabinet lit from inside — a stack of kit behind a mesh door,
+  // seen as one bright vertical bar. Dots read as Christmas lights.
+  const ledGeo = new THREE.PlaneGeometry(0.34, 1.74);
   const ledMat = new THREE.MeshBasicMaterial({ toneMapped: false });
 
+  // TWO KINDS OF GAP. The aisles between rows are for reaching the cabinets;
+  // the cross corridors between GROUPS are for crossing the hall, and without
+  // them the floor is one uninterrupted wall of steel a hundred and fifty
+  // metres long. Real halls are laid out in blocks for exactly this reason.
+  const GROUP_LEN = 13.5, CORRIDOR = 6.0;
   const spots = [];
-  // Aisles wide enough to walk down, because you can.
+  const runs = [];
   for (let z = -D / 2 + 12; z < D / 2 - 12; z += 5.2) {
-    for (let x = -W / 2 + 11; x < W / 2 - 11; x += 0.68) spots.push([x, z]);
+    for (let gx = -W / 2 + 11; gx < W / 2 - 11; gx += GROUP_LEN + CORRIDOR) {
+      const x1 = Math.min(gx + GROUP_LEN, W / 2 - 11);
+      if (x1 - gx < 2) continue;
+      for (let x = gx; x < x1; x += 0.68) spots.push([x, z]);
+      runs.push({ z, x0: gx, x1 });
+    }
   }
   ledCount = spots.length;
 
@@ -1771,11 +1853,11 @@ function buildDatacentre() {
     m4.updateMatrix();
     racks.setMatrixAt(i, m4.matrix);
     // The face panel, turned to look down the aisle.
-    m4.position.set(x, base + 1.30, z + 0.60);
+    m4.position.set(x, base + 1.12, z + 0.60);
     m4.rotation.set(0, 0, 0);
     m4.updateMatrix();
     ledMesh.setMatrixAt(i, m4.matrix);
-    col.setHSL(0.34 + rand() * 0.12, 0.80, 0.10 + rand() * 0.09);
+    col.setHSL(0.55 + rand() * 0.05, 0.92, 0.30 + rand() * 0.24);
     ledMesh.setColorAt(i, col);
   }
   // ONE BLOCKER PER ROW, not one per cabinet. blocked() is a linear scan, so
@@ -1783,11 +1865,9 @@ function buildDatacentre() {
   // row is a continuous line of steel anyway and a rectangle says so exactly.
   {
     const rowTop = heightAt(DC.x, DC.z) + base + 2.2;
-    const seen = new Set();
-    for (const [x, z] of spots) {
-      if (seen.has(z)) continue;
-      seen.add(z);
-      blockers.push({ x: DC.x, z: DC.z + z, hw: (W - 22) / 2, hd: 0.62, top: rowTop });
+    for (const r of runs) {
+      blockers.push({ x: DC.x + (r.x0 + r.x1) / 2, z: DC.z + r.z,
+                      hw: (r.x1 - r.x0) / 2, hd: 0.62, top: rowTop });
     }
   }
   racks.instanceMatrix.needsUpdate = true;
@@ -1800,19 +1880,19 @@ function buildDatacentre() {
   // daylight: inside, the exterior sun is turned right down and what is left is
   // this, which is the whole point of the room.
   for (let z = -D / 2 + 9; z < D / 2 - 9; z += 7.4) {
-    const mat = new THREE.MeshBasicMaterial({ color: 0x9fd3d8, toneMapped: false });
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(W - 22, 0.16, 0.34), mat);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xcfe6f4, toneMapped: false });
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(W - 20, 0.16, 0.34), mat);
     strip.position.set(0, base + H - 1.6, z);
     dcInterior.add(strip);
     stripMats.push({ mat, phase: rand() * 6.28, bad: rand() < 0.22 });
   }
   for (let i = -2; i <= 2; i++) {
-    const l = new THREE.PointLight(0x86b6c4, 0, 78, 1.6);
+    const l = new THREE.PointLight(0x6f9fd8, 0, 86, 1.5);
     l.position.set(i * (W / 5.5), base + H - 3.2, 0);
     dcInterior.add(l);
     interiorLights.push(l);
   }
-  const amb = new THREE.HemisphereLight(0x24343e, 0x0b1014, 0);
+  const amb = new THREE.HemisphereLight(0x2a4560, 0x0a1119, 0);
   dcInterior.add(amb);
   interiorLights.push(amb);
 
@@ -2143,6 +2223,7 @@ function setIndoors(v) {
   indoors = v;
   dcRoof.visible = !v;
   dcNear.visible = !v;
+  dcGhost.visible = v;
   renderer.shadowMap.needsUpdate = true;
   applyLight();
 }
@@ -3066,19 +3147,28 @@ function frame(now) {
       const roll = Math.random();
       // Mostly the steady green of something idling, occasionally amber, and
       // very rarely the red that makes you look twice.
-      if (roll < 0.86) ledCol.setHSL(0.34 + Math.random() * 0.10, 0.80, 0.09 + Math.random() * 0.20);
-      else if (roll < 0.98) ledCol.setHSL(0.11, 0.88, 0.22 + Math.random() * 0.20);
-      else ledCol.setHSL(0.01, 0.90, 0.26 + Math.random() * 0.18);
+      // Blue is the room. Amber and red exist only to be noticed, which they
+      // cannot be if there are many of them.
+      if (roll < 0.90) ledCol.setHSL(0.55 + Math.random() * 0.05, 0.92, 0.26 + Math.random() * 0.34);
+      else if (roll < 0.965) ledCol.setHSL(0.52, 0.55, 0.62 + Math.random() * 0.22);
+      else if (roll < 0.992) ledCol.setHSL(0.11, 0.88, 0.30 + Math.random() * 0.18);
+      else ledCol.setHSL(0.01, 0.90, 0.32 + Math.random() * 0.16);
       ledMesh.setColorAt(i, ledCol);
     }
     ledMesh.instanceColor.needsUpdate = true;
+
+    // The exit breathes, slowly. A steady rectangle reads as scenery.
+    for (let i = 0; i < exitGlow.length; i++) {
+      const b = 0.5 + 0.5 * Math.sin(now * 0.0014 + i * 0.9);
+      exitGlow[i].opacity = (i === 0 ? 0.11 : 0.20) + b * (i === 0 ? 0.10 : 0.16);
+    }
 
     // A couple of the strips are on their way out. Slow, and never a strobe.
     const t = now * 0.001;
     for (const s2 of stripMats) {
       const base2 = 0.42 + 0.06 * Math.sin(t * 0.7 + s2.phase);
       const fail = s2.bad ? (Math.sin(t * 2.3 + s2.phase) > 0.72 ? 0.16 : 1) : 1;
-      s2.mat.color.setRGB(0.62 * base2 * fail, 0.83 * base2 * fail, 0.87 * base2 * fail);
+      s2.mat.color.setRGB(0.72 * base2 * fail, 0.86 * base2 * fail, 0.98 * base2 * fail);
     }
   }
 

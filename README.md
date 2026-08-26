@@ -59,9 +59,11 @@ for run) and `;` `'` for the size of the held weapon.
 
 A datacentre stands to the north — 168 x 78 x 17 m, on ground levelled for it,
 with a trail running up to its gate. It has a door, and walking through it puts
-you inside: raised-floor tiling, rows of cabinets with LEDs blinking out of step
-with each other, dim strips overhead with a couple of them failing, and the sun
-turned right down so the room is lit by its own machines.
+you inside: a pale raised floor with grated panels, blocks of cabinets glowing blue from
+inside, aisles between the rows and corridors between the blocks, dim strips
+overhead with a couple of them failing, and the sun turned right down so the
+room is lit by its own machines. The near walls leave a ghost behind so you can
+still find the way out.
 
 Nothing loads and nothing cuts. The roof and the two walls the camera looks
 through simply come off at the threshold, with a little hysteresis so standing
