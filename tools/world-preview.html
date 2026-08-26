@@ -362,7 +362,7 @@ renderer.shadowMap.needsUpdate = true;
 const scene = new THREE.Scene();
 const SKY = 0x8fb6c8;
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 62, 150);
+scene.fog = new THREE.Fog(SKY, 78, 215);
 
 const orthoCam = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 400);
 const perspCam = new THREE.PerspectiveCamera(32, 1, 0.1, 400);
@@ -374,6 +374,12 @@ const cam = () => ortho ? orthoCam : perspCam;
 // deciding by eye. 0 is the overcast default; 1 is the hard low key the sprite
 // bake never had; 2 is near-noon, which flattens the figure and is here to show
 // what it costs.
+// Declared before the light rig, because applyLight() reads both and runs at
+// load — long before the building exists. `let` in the temporal dead zone
+// throws even under typeof, so a guard would not have saved it either.
+let indoors = false;
+const interiorLights = [];
+
 const hemi = new THREE.HemisphereLight(0xcfe4f2, 0x4a5240, 0.85);
 scene.add(hemi);
 const key = new THREE.DirectionalLight(0xfff4e2, 1.5);
@@ -439,6 +445,10 @@ function sunAt(t) {
 
 function applyLight() {
   const dir = sunAt(tod);
+  // Indoors the sun is turned right down. With the roof off it would otherwise
+  // pour daylight into a room that has never seen any, and the strips and the
+  // LEDs — the only honest light in there — would count for nothing.
+  const inside = indoors ? 0.10 : 1;
   const up = Math.max(0, dir.y);                  // 0 at the horizon, 1 overhead
   const day = Math.min(1, up * 3.2);              // full daylight well before noon
   daylight = day;
@@ -452,23 +462,29 @@ function applyLight() {
   // left the shaded side of the datacentre at about a sixth of the lit side and
   // reading as black. Bringing the key down and the sky up puts it near half,
   // which is what an overcast-ish day actually looks like.
-  key.intensity = 2.0 * Math.pow(day, 0.7);
+  key.intensity = 2.0 * Math.pow(day, 0.7) * inside;
   key.color.copy(SUN_LOW).lerp(SUN_HIGH, Math.min(1, up * 2.6));
 
   // The moon takes over as the sun goes, from the opposite side of the sky.
   const night = 1 - day;
   // Enough moon to walk by. Pitch dark is accurate and unplayable.
-  moon.intensity = 0.42 * night;
+  moon.intensity = 0.42 * night * inside;
   moon.color.setHex(0x9fb6d8);
 
-  hemi.intensity = 0.20 + day * 1.30;
+  hemi.intensity = (0.20 + day * 1.30) * inside;
   hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, day);
   hemi.groundColor.setHex(0x2a3024).lerp(new THREE.Color(0x6b7360), day);
-  rim.intensity = 0.12 + day * 0.46;
+  rim.intensity = (0.12 + day * 0.46) * inside;
 
   tmpCol.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_LOW, low * 0.75);
+  if (indoors) tmpCol.setHex(0x070c11);
   scene.background.copy(tmpCol);
   scene.fog.color.copy(tmpCol);
+
+  // The room's own lighting, which only runs while you are in it.
+  for (const l of interiorLights) {
+    l.intensity = indoors ? (l.isHemisphereLight ? 0.55 : 26) : 0;
+  }
 }
 
 // Where the day has got to, for the readout.
@@ -505,7 +521,10 @@ const scatter = makeRand(19940417);     // where things stand
 // THE DATACENTRE. North is -Z. It sits a hundred metres off, which is far
 // enough that you come upon it rather than start beside it, and big enough that
 // it is on the skyline from the camp.
-const DC = { x: 0, z: -82, w: 92, d: 46, h: 15 };
+// A REAL ONE IS ENORMOUS. 92 x 46 was a shed; a hyperscale hall is a couple of
+// hundred metres on its long side, and the point of standing next to it is that
+// it does not fit in your view. The world grew to hold it.
+const DC = { x: 0, z: -96, w: 168, d: 78, h: 17 };
 
 const TERRAIN_AMP = 7.5;
 const TERRAIN_SCALE = 46;
@@ -585,9 +604,9 @@ function heightAt(x, z) {
 
   // And the datacentre stands on ground that was levelled for it — a rectangular
   // pad with a graded margin, which is what earthworks look like from the air.
-  const px = Math.abs(x - DC.x) - DC.w / 2 - 15;
-  const pz = Math.abs(z - DC.z) - DC.d / 2 - 15;
-  const pad = Math.min(1, Math.max(0, Math.max(px, pz) / 26));
+  const px = Math.abs(x - DC.x) - DC.w / 2 - 16;
+  const pz = Math.abs(z - DC.z) - DC.d / 2 - 16;
+  const pad = Math.min(1, Math.max(0, Math.max(px, pz) / 30));
   return h * fade(pad);
 }
 
@@ -601,7 +620,7 @@ function heightAt(x, z) {
 // STEP_UP, so he walks on without a jump.
 const APRON_H = 0.35;
 function onApron(x, z) {
-  return Math.abs(x - DC.x) < DC.w / 2 + 13 && Math.abs(z - DC.z) < DC.d / 2 + 13;
+  return Math.abs(x - DC.x) < DC.w / 2 + 14 && Math.abs(z - DC.z) < DC.d / 2 + 14;
 }
 function groundY(x, z) { return heightAt(x, z) + (onApron(x, z) ? APRON_H : 0); }
 
@@ -676,7 +695,7 @@ function shoveClear() {
 //
 // A world-space texture has no such problem. It also gives an edge as fine as
 // the canvas rather than as coarse as the mesh.
-const WORLD = 240;             // the ground plane is WORLD x WORLD, centred
+const WORLD = 300;             // the ground plane is WORLD x WORLD, centred
 const TRACK_WIDTH = 2.1;       // metres
 
 // A PATH IS NOT A LINE ON A MAP. It is where feet found the easy way, so it
@@ -730,7 +749,7 @@ const trackPts = TRACKS.flat();
 
 // Nothing grows in a path. Used to keep tufts, trees and rocks off them.
 function onYard(x, z) {
-  return Math.abs(x - DC.x) < DC.w / 2 + 18 && Math.abs(z - DC.z) < DC.d / 2 + 18;
+  return Math.abs(x - DC.x) < DC.w / 2 + 20 && Math.abs(z - DC.z) < DC.d / 2 + 20;
 }
 
 function onTrack(x, z, pad) {
@@ -876,7 +895,7 @@ function groundTexture() {
   // soft margin because a levelled site does not end at a line either.
   {
     const cx = (DC.x + WORLD / 2) * P, cz = (DC.z + WORLD / 2) * P;
-    const hw = (DC.w / 2 + 22) * P, hd = (DC.d / 2 + 22) * P;
+    const hw = (DC.w / 2 + 24) * P, hd = (DC.d / 2 + 24) * P;
     const yard = g.createRadialGradient(cx, cz, 0, cx, cz, hw);
     yard.addColorStop(0.0, 'rgba(168,169,161,0.94)');
     yard.addColorStop(0.62, 'rgba(166,167,158,0.90)');
@@ -1057,7 +1076,7 @@ const groundMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: groundTe
     const g2 = cv.getContext('2d');
     const P2 = cv.width / WORLD;
     const cx = (DC.x + WORLD / 2) * P2, cz = (DC.z + WORLD / 2) * P2;
-    const hw = (DC.w / 2 + 20) * P2, hd = (DC.d / 2 + 20) * P2;
+    const hw = (DC.w / 2 + 22) * P2, hd = (DC.d / 2 + 22) * P2;
     g2.save();
     g2.beginPath();
     g2.ellipse(cx, cz, hw, hd, 0, 0, 6.29);
@@ -1094,7 +1113,7 @@ groundMat.onBeforeCompile = (sh) => {
   // down — so it fades out inside the fence, where the canvas already carries
   // the right surface.
   sh.uniforms.yardMid = { value: new THREE.Vector2(DC.x, DC.z) };
-  sh.uniforms.yardHalf = { value: new THREE.Vector2(DC.w / 2 + 20, DC.d / 2 + 20) };
+  sh.uniforms.yardHalf = { value: new THREE.Vector2(DC.w / 2 + 22, DC.d / 2 + 22) };
   sh.uniforms.worldSize = { value: WORLD };
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec2 vGroundUv;')
@@ -1116,7 +1135,7 @@ groundMat.onBeforeCompile = (sh) => {
       + '\tfloat onYard = 1.0 - smoothstep(0.75, 1.05, max(q.x, q.y));\n'
       + '\tdiffuseColor.rgb *= 1.0 + (dLum - 0.42) * detailStrength * (1.0 - onYard * 0.88);');
 };
-const groundGeo = new THREE.PlaneGeometry(240, 240, 288, 288);
+const groundGeo = new THREE.PlaneGeometry(WORLD, WORLD, 320, 320);
 {
   // The mesh is turned -90° about X, so a local (x, y) lands at world (x, -y)
   // and the local +z the vertices are pushed along becomes world up.
@@ -1133,7 +1152,7 @@ scene.add(ground);
 // The 2:1 lattice, turned 45 degrees so it reads as the isometric grid the old
 // world was drawn on. Off by default; G brings it back when you want to know
 // whether a tile-based world would still fit under this.
-const grid = new THREE.GridHelper(240, 120, 0x000000, 0x000000);
+const grid = new THREE.GridHelper(WORLD, 150, 0x000000, 0x000000);
 grid.material.opacity = 0.08;
 grid.material.transparent = true;
 grid.rotation.y = Math.PI / 4;
@@ -1366,7 +1385,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   // two trunks under it. Rejection sampling against what is already down keeps
   // them apart at a spacing that scales with how big each one is.
   for (let tries = 0; tries < 6000 && canopies.length < 34; tries++) {
-    const a = scatter() * Math.PI * 2, d = 15 + scatter() * 42;
+    const a = scatter() * Math.PI * 2, d = 16 + scatter() * 58;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
     if (onTrack(x, z, 2.0)) continue;
     const h = 5.6 + scatter() * 4.2;
@@ -1386,7 +1405,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
   }
 
   for (let i = 0; i < 46; i++) {
-    const a = scatter() * Math.PI * 2, d = 9 + scatter() * 46;
+    const a = scatter() * Math.PI * 2, d = 9 + scatter() * 62;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
     if (onTrack(x, z, 0.9) || onYard(x, z)) continue;
     if (canopies.some(c => (x - c.x) ** 2 + (z - c.z) ** 2 < (c.r * 0.5) ** 2)) continue;
@@ -1430,7 +1449,7 @@ Promise.all([...new Set([...TREE_MODELS, ...ROCK_MODELS, ...UNDER_MODELS, ...PAT
 
   // Undergrowth, close in where it will be seen.
   for (let i = 0; i < 90; i++) {
-    const a = scatter() * Math.PI * 2, d = 9 + scatter() * 32;
+    const a = scatter() * Math.PI * 2, d = 9 + scatter() * 40;
     const x = Math.cos(a) * d, z = Math.sin(a) * d;
     if (onTrack(x, z, 0.7) || onYard(x, z)) continue;
     const src = lib.get(UNDER_MODELS[(scatter() * UNDER_MODELS.length) | 0]);
@@ -1581,8 +1600,23 @@ const TEX_SLAB = (() => {
   return t;
 })();
 
+// A hall you can walk into. The shell is built as separate walls and a roof
+// rather than one box, because the roof has to come off when you are inside and
+// the south wall needs a hole in it.
+const dcRoof = new THREE.Group();     // stripped away indoors
+const dcNear = new THREE.Group();     // the two walls the camera looks through
+const dcInterior = new THREE.Group();
+let ledMesh = null, ledCount = 0;
+const stripMats = [];
+
+const DOOR_W = 8, DOOR_H = 5.2;
+
 function buildDatacentre() {
   const g = new THREE.Group();
+  const W = DC.w, D = DC.d, H = DC.h;
+  const base = APRON_H;                     // the hall stands ON the apron, so
+                                            // walking in is level, not a step
+
   const clad = (tex, w, h, d, col, tile) => {
     const t = siteClone(tex);
     t.repeat.set(Math.max(w, d) / tile, Math.max(h, d) / tile);
@@ -1592,88 +1626,226 @@ function buildDatacentre() {
     new THREE.BoxGeometry(w, h, d),
     tile === 0 ? new THREE.MeshLambertMaterial({ color: col, flatShading: true })
                : clad(TEX_CONCRETE, w, h, d, col, tile));
-  // A box that stands on the ground and is taller than a step registers its own
-  // footprint. Hand-listing the solid parts is how the chillers and the stacks
-  // came to be walk-through: they were built and then forgotten about.
-  const put = (m, x, y, z, solid = true) => {
+  const put = (m, x, y, z, solid = true, parent = g) => {
     m.position.set(x, y, z);
     m.castShadow = true;
     m.receiveShadow = true;
-    g.add(m);
+    parent.add(m);
     const p = m.geometry.parameters;
-    const base = y - p.height / 2, top = y + p.height / 2;
-    if (solid && p.height >= STEP_UP && base < STEP_UP + 0.4) {
+    if (solid && p.height >= STEP_UP && (y - p.height / 2) < STEP_UP + 0.4) {
       blockers.push({ x: DC.x + x, z: DC.z + z, hw: p.width / 2, hd: p.depth / 2,
-                      top: heightAt(DC.x, DC.z) + top });
+                      top: heightAt(DC.x, DC.z) + y + p.height / 2 });
     }
     return m;
   };
 
-  const W = DC.w, D = DC.d, H = DC.h;
-
-  // The apron it stands on, a hand's breadth above the levelled ground.
-  // The apron, in real paving slabs. The photograph has grass down both sides,
-  // so it is cropped to the concrete before use; the joint line that survives
-  // the crop then repeats as a course, which is what a slab field looks like.
+  // ---- the apron, in real paving slabs --------------------------------------
   {
-    TEX_SLAB.repeat.set((W + 26) / 2.4, (D + 26) / 2.4);
+    TEX_SLAB.repeat.set((W + 30) / 2.4, (D + 30) / 2.4);
     const m = new THREE.Mesh(
-      new THREE.BoxGeometry(W + 26, 0.35, D + 26),
+      new THREE.BoxGeometry(W + 30, 0.35, D + 30),
       new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }));
     put(m, 0, 0.17, 0, false);
   }
-  // Plinth, then the hall.
-  put(box(W + 2.4, 1.4, D + 2.4, 0x9ea3a7), 0, 0.9, 0, false);
-  put(box(W, H, D, 0xf2f2ee), 0, 1.6 + H / 2, 0);
-  // A darker band at the top, which is what stops a big box reading as a box.
-  put(box(W + 0.5, 1.6, D + 0.5, 0xa8adb1), 0, 1.6 + H - 0.4, 0);
-  // Louvred flanks: shallow pilasters down the long sides at a fixed rhythm.
-  for (let i = -6; i <= 6; i++) {
-    const x = i * (W / 13.5);
-    put(box(1.5, H - 2.4, 0.7, 0xc9ced2), x, 1.6 + H / 2, D / 2 + 0.3);
-    put(box(1.5, H - 2.4, 0.7, 0xc9ced2), x, 1.6 + H / 2, -D / 2 - 0.3);
+
+  // ---- the floor inside -----------------------------------------------------
+  // Tiles, drawn to a canvas: a grid at this size is a texture, not geometry.
+  const floorTex = (() => {
+    const N = 512, cv = document.createElement('canvas');
+    cv.width = cv.height = N;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#6a6f74';
+    c.fillRect(0, 0, N, N);
+    // Four tiles across the texture, each with its own slight cast, because a
+    // raised floor is panels and panels never match.
+    for (let i = 0; i < 4; i++) {
+      for (let j = 0; j < 4; j++) {
+        const v = 96 + rand() * 26 | 0;
+        c.fillStyle = 'rgb(' + v + ',' + (v + 3) + ',' + (v + 7) + ')';
+        c.fillRect(i * N / 4 + 2, j * N / 4 + 2, N / 4 - 4, N / 4 - 4);
+      }
+    }
+    // Grout, and the perforations a raised floor has for the cold air.
+    c.strokeStyle = 'rgba(20,24,28,0.85)';
+    c.lineWidth = 3;
+    for (let i = 0; i <= 4; i++) {
+      c.beginPath(); c.moveTo(i * N / 4, 0); c.lineTo(i * N / 4, N); c.stroke();
+      c.beginPath(); c.moveTo(0, i * N / 4); c.lineTo(N, i * N / 4); c.stroke();
+    }
+    c.fillStyle = 'rgba(18,22,26,0.55)';
+    for (let i = 0; i < 900; i++) {
+      c.fillRect(rand() * N, rand() * N, 2, 2);
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    t.repeat.set(W / 2.4, D / 2.4);       // 0.6 m panels, four to a tile
+    return t;
+  })();
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(W - 0.6, D - 0.6),
+    new THREE.MeshLambertMaterial({ color: 0xffffff, map: floorTex }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(0, base + 0.02, 0);
+  floor.receiveShadow = true;
+  g.add(floor);
+
+  // ---- walls ----------------------------------------------------------------
+  const T = 0.9;                            // wall thickness
+  const wallCol = 0xf2f2ee;
+  // North and west are the far walls: they stay up, and are what you see the
+  // interior against.
+  put(box(W, H, T, wallCol, 5), 0, base + H / 2, -D / 2);
+  put(box(T, H, D, wallCol, 5), -W / 2, base + H / 2, 0);
+  // South and east are the near ones. They go into dcNear so they can be taken
+  // away the moment you are inside, which is what makes it seamless: no load,
+  // no cut, the building simply opens.
+  put(box(T, H, D, wallCol, 5), W / 2, base + H / 2, 0, true, dcNear);
+  // The south wall is in two pieces with a lintel over the gap between them.
+  const seg = (W - DOOR_W) / 2;
+  for (const sgn of [-1, 1]) {
+    put(box(seg, H, T, wallCol, 5), sgn * (DOOR_W / 2 + seg / 2), base + H / 2, D / 2, true, dcNear);
+  }
+  put(box(DOOR_W, H - DOOR_H, T, wallCol, 5), 0, base + DOOR_H + (H - DOOR_H) / 2, D / 2, false, dcNear);
+  // A frame around the opening, so it reads as a door and not as damage.
+  for (const sgn of [-1, 1]) {
+    put(box(0.5, DOOR_H + 0.5, T + 0.5, 0x5d6167, 0), sgn * (DOOR_W / 2 + 0.25), base + (DOOR_H + 0.5) / 2, D / 2, false, dcNear);
+  }
+  put(box(DOOR_W + 1.4, 0.5, T + 0.5, 0x5d6167, 0), 0, base + DOOR_H + 0.25, D / 2, false, dcNear);
+
+  // Wall collision, with the doorway left open.
+  const wallTop = heightAt(DC.x, DC.z) + base + H;
+  const wall = (x, z, hw, hd) => blockers.push({ x: DC.x + x, z: DC.z + z, hw, hd, top: wallTop });
+  wall(0, -D / 2, W / 2, T / 2 + 0.1);
+  wall(-W / 2, 0, T / 2 + 0.1, D / 2);
+  wall(W / 2, 0, T / 2 + 0.1, D / 2);
+  for (const sgn of [-1, 1]) {
+    wall(sgn * (DOOR_W / 2 + seg / 2), D / 2, seg / 2, T / 2 + 0.1);
   }
 
-  // Roof plant, in ranks. Repetition is the whole visual argument of the thing.
-  for (let r = -1; r <= 1; r++) {
-    for (let i = -7; i <= 7; i++) {
-      const u = put(box(4.2, 2.2, 3.0, 0xdfe3e6, 1.6), i * (W / 15.5), 1.6 + H + 1.1, r * (D / 3.4));
-      put(box(3.4, 0.35, 2.4, 0x3f4347, 0), u.position.x, u.position.y + 1.25, u.position.z);
+  // ---- roof -----------------------------------------------------------------
+  put(box(W + 1.2, 0.8, D + 1.2, 0xa8adb1, 6), 0, base + H + 0.4, 0, false, dcRoof);
+  for (let r = -2; r <= 2; r++) {
+    for (let i = -13; i <= 13; i++) {
+      const u = put(box(4.6, 2.4, 3.2, 0xdfe3e6, 1.6),
+                    i * (W / 28), base + H + 2.0, r * (D / 6), false, dcRoof);
+      put(box(3.6, 0.4, 2.6, 0x3f4347, 0), u.position.x, u.position.y + 1.4, u.position.z, false, dcRoof);
     }
   }
-  // Chillers and transformers down the west flank.
-  for (let i = -3; i <= 3; i++) {
-    put(box(5.0, 4.0, 7.5, 0xd2d7da, 2.2), -W / 2 - 6.5, APRON_H + 2.0, i * 9.2);
+  g.add(dcRoof);
+  g.add(true, dcNear);
+
+  // ---- the racks ------------------------------------------------------------
+  // FOUR THOUSAND CABINETS IN TWO DRAW CALLS. One InstancedMesh for the bodies
+  // and one for the light strips; individually they would be four thousand
+  // objects and the frame would die. They cast and receive nothing — the
+  // interior is lit by its own strips and by the LEDs, and a shadow pass over
+  // this many boxes would cost more than everything else together.
+  const rackGeo = new THREE.BoxGeometry(0.62, 2.2, 1.15);
+  const rackMat = new THREE.MeshLambertMaterial({ color: 0x23282d, flatShading: true });
+  // Small. At 0.42 x 1.5 the panels touched each other down the row and the
+  // hall read as a wall of colour rather than as cabinets with lights on them;
+  // what makes it look like a datacentre is the dark between them.
+  const ledGeo = new THREE.PlaneGeometry(0.24, 0.78);
+  const ledMat = new THREE.MeshBasicMaterial({ toneMapped: false });
+
+  const spots = [];
+  // Aisles wide enough to walk down, because you can.
+  for (let z = -D / 2 + 12; z < D / 2 - 12; z += 5.2) {
+    for (let x = -W / 2 + 11; x < W / 2 - 11; x += 0.68) spots.push([x, z]);
   }
-  // Hazard banding at the foot of the plant, and nowhere else. It is the one
-  // loud texture in the kit and a little of it goes a long way.
-  for (let i = -3; i <= 3; i++) {
-    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, map: siteClone(TEX_HAZARD) });
-    m.map.repeat.set(3.2, 0.4);
-    const b = new THREE.Mesh(new THREE.BoxGeometry(5.3, 0.55, 7.8), m);
-    put(b, -W / 2 - 6.5, APRON_H + 0.28, i * 9.2, false);
+  ledCount = spots.length;
+
+  const racks = new THREE.InstancedMesh(rackGeo, rackMat, ledCount);
+  ledMesh = new THREE.InstancedMesh(ledGeo, ledMat, ledCount);
+  racks.castShadow = racks.receiveShadow = false;
+  ledMesh.castShadow = ledMesh.receiveShadow = false;
+
+  const m4 = new THREE.Object3D();
+  const col = new THREE.Color();
+  for (let i = 0; i < ledCount; i++) {
+    const [x, z] = spots[i];
+    m4.position.set(x, base + 1.1, z);
+    m4.rotation.set(0, 0, 0);
+    m4.updateMatrix();
+    racks.setMatrixAt(i, m4.matrix);
+    // The face panel, turned to look down the aisle.
+    m4.position.set(x, base + 1.30, z + 0.60);
+    m4.rotation.set(0, 0, 0);
+    m4.updateMatrix();
+    ledMesh.setMatrixAt(i, m4.matrix);
+    col.setHSL(0.34 + rand() * 0.12, 0.80, 0.10 + rand() * 0.09);
+    ledMesh.setColorAt(i, col);
+  }
+  // ONE BLOCKER PER ROW, not one per cabinet. blocked() is a linear scan, so
+  // four thousand of them would be four thousand tests three times a frame; a
+  // row is a continuous line of steel anyway and a rectangle says so exactly.
+  {
+    const rowTop = heightAt(DC.x, DC.z) + base + 2.2;
+    const seen = new Set();
+    for (const [x, z] of spots) {
+      if (seen.has(z)) continue;
+      seen.add(z);
+      blockers.push({ x: DC.x, z: DC.z + z, hw: (W - 22) / 2, hd: 0.62, top: rowTop });
+    }
+  }
+  racks.instanceMatrix.needsUpdate = true;
+  ledMesh.instanceMatrix.needsUpdate = true;
+  ledMesh.instanceColor.needsUpdate = true;
+  dcInterior.add(racks, ledMesh);
+
+  // ---- overhead, and the light that makes it feel wrong ---------------------
+  // Long dim strips down the aisles, a couple of them failing. Nothing here is
+  // daylight: inside, the exterior sun is turned right down and what is left is
+  // this, which is the whole point of the room.
+  for (let z = -D / 2 + 9; z < D / 2 - 9; z += 7.4) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x9fd3d8, toneMapped: false });
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(W - 22, 0.16, 0.34), mat);
+    strip.position.set(0, base + H - 1.6, z);
+    dcInterior.add(strip);
+    stripMats.push({ mat, phase: rand() * 6.28, bad: rand() < 0.22 });
+  }
+  for (let i = -2; i <= 2; i++) {
+    const l = new THREE.PointLight(0x86b6c4, 0, 78, 1.6);
+    l.position.set(i * (W / 5.5), base + H - 3.2, 0);
+    dcInterior.add(l);
+    interiorLights.push(l);
+  }
+  const amb = new THREE.HemisphereLight(0x24343e, 0x0b1014, 0);
+  dcInterior.add(amb);
+  interiorLights.push(amb);
+
+  g.add(dcInterior);
+
+  // ---- outside: pilasters, plant, stacks, fence, signs, units ---------------
+  for (let i = -11; i <= 11; i++) {
+    const x = i * (W / 24);
+    if (Math.abs(x) > DOOR_W / 2 + 1.6) {
+      put(box(1.6, H - 2.6, 0.7, 0xc9ced2, 4), x, base + H / 2, D / 2 + 0.6, false, dcNear);
+    }
+    put(box(1.6, H - 2.6, 0.7, 0xc9ced2, 4), x, base + H / 2, -D / 2 - 0.6, false);
+  }
+  for (let i = -5; i <= 5; i++) {
+    put(box(5.4, 4.2, 8.0, 0xd2d7da, 2.2), -W / 2 - 7.0, APRON_H + 2.1, i * 11.5);
+    const hm = new THREE.MeshLambertMaterial({ color: 0xffffff, map: siteClone(TEX_HAZARD) });
+    hm.map.repeat.set(3.2, 0.4);
+    put(new THREE.Mesh(new THREE.BoxGeometry(5.7, 0.55, 8.3), hm), -W / 2 - 7.0, APRON_H + 0.28, i * 11.5, false);
+  }
+  for (const sx of [W / 2 - 12, W / 2 - 22]) {
+    put(box(2.6, H + 11, 2.6, 0x9ba0a4, 3), sx, base + (H + 11) / 2, -D / 2 + 7);
   }
 
-  // Two stacks.
-  for (const sx of [W / 2 - 8, W / 2 - 16]) {
-    put(box(2.2, H + 9, 2.2, 0x9ba0a4), sx, 1.6 + (H + 9) / 2, -D / 2 + 5);
-  }
-
-  // Perimeter fence. Posts and rails are drawn but not solid — the barrier is
-  // the four rectangles registered below, which is one test instead of sixty and
-  // leaves a gate rather than a post standing in the gateway.
-  // ON the apron edge. The paving reaches W/2 + 13; at +14 the posts stood a
-  // metre beyond it on terrain 0.35 m lower and floated, and at +11 they were
-  // set two metres back from a kerb that ought to carry them.
-  const fw = W / 2 + 12.4, fd = D / 2 + 12.4;
-  const GATE = 7;                                  // half-width of the way in
-  for (let i = -14; i <= 14; i++) {
-    const x = (i / 14) * fw;
+  // Fence, on the apron edge, with a gate opposite the door.
+  const fw = W / 2 + 14, fd = D / 2 + 14;
+  const GATE = 8;
+  for (let i = -22; i <= 22; i++) {
+    const x = (i / 22) * fw;
     if (Math.abs(x) > GATE) put(box(0.22, 2.6, 0.22, 0x3d4145, 0), x, APRON_H + 1.3, fd, false);
     put(box(0.22, 2.6, 0.22, 0x3d4145, 0), x, APRON_H + 1.3, -fd, false);
   }
-  for (let i = -7; i <= 7; i++) {
-    const z = (i / 7) * fd;
+  for (let i = -11; i <= 11; i++) {
+    const z = (i / 11) * fd;
     for (const x of [fw, -fw]) put(box(0.22, 2.6, 0.22, 0x3d4145, 0), x, APRON_H + 1.3, z, false);
   }
   put(box(fw * 2, 0.10, 0.10, 0x3d4145, 0), 0, APRON_H + 2.4, -fd, false);
@@ -1681,6 +1853,15 @@ function buildDatacentre() {
   for (const sgn of [-1, 1]) {
     const half = (fw - GATE) / 2;
     put(box(half * 2, 0.10, 0.10, 0x3d4145, 0), sgn * (GATE + half), APRON_H + 2.4, fd, false);
+  }
+  const railTop = heightAt(DC.x, DC.z) + APRON_H + 2.6;
+  const rail = (x, z, hw, hd) => blockers.push({ x: DC.x + x, z: DC.z + z, hw, hd, top: railTop });
+  rail(0, -fd, fw, 0.2);
+  rail(-fw, 0, 0.2, fd);
+  rail(fw, 0, 0.2, fd);
+  for (const sgn of [-1, 1]) {
+    const half = (fw - GATE) / 2;
+    rail(sgn * (GATE + half), fd, half, 0.2);
   }
 
   // THE SIGN. Drawn to a canvas rather than modelled as letters: a texture on a
@@ -1811,34 +1992,27 @@ function buildDatacentre() {
   };
 
   const NAME = 'NEOCLOUD DATA SOLUTIONS';
-  // SIZED TO BE READ IN ONE VIEW. At the default zoom the orthographic camera
-  // covers about 39 m of world, so a 62 m sign can never be seen whole however
-  // clear the letters are. 34 m fits, and a name you can read is worth more than
-  // a name that fills the wall.
+  // Both signs hang on near walls, so they go with them when you step inside.
+  const signY = base + H * 0.66;
   const southMat = signMat(NAME, 2048, 300);
-  const south = new THREE.Mesh(new THREE.PlaneGeometry(34, 5.0), southMat);
-  // PROUD OF THE PILASTERS. The flank ribs stand 0.7 m off the wall, so a sign
-  // at 0.35 sits inside them and they cut the name into pieces — which is what
-  // was happening. It hangs off the face, the way a fixed sign does.
-  south.position.set(0, 1.6 + H * 0.62, D / 2 + 0.95);
+  const south = new THREE.Mesh(new THREE.PlaneGeometry(40, 5.9), southMat);
+  south.position.set(-W * 0.22, signY, D / 2 + 1.05);
   south.receiveShadow = true;
-  g.add(south);
+  dcNear.add(south);
 
   const eastMat = signMat(NAME, 1536, 300);
-  const east = new THREE.Mesh(new THREE.PlaneGeometry(30, 5.9), eastMat);
+  const east = new THREE.Mesh(new THREE.PlaneGeometry(34, 6.6), eastMat);
   east.rotation.y = Math.PI / 2;
-  east.position.set(W / 2 + 0.55, 1.6 + H * 0.62, 0);
+  east.position.set(W / 2 + 0.65, signY, 0);
   east.receiveShadow = true;
-  g.add(east);
+  dcNear.add(east);
 
   signs.push(southMat, eastMat);
 
-  // The units sit where they always sat. The four that happen to hang over a
-  // sign are lamps instead of cameras, angled DOWN at the name — the building
-  // stays black and the company's name is the only lit thing for a hundred
-  // metres, which is a worse thing to come across than a camera. The rest are
-  // still cameras, and every unit keeps a red pilot.
+  // Units on the south and east faces belong to dcNear, so they leave with the
+  // walls they are bolted to rather than hanging in the air indoors.
   const unitAt = (x, y, z, yaw, litTarget) => {
+    const host = (yaw === 0 || yaw === -Math.PI / 2) ? dcNear : g;
     const u = new THREE.Group();
     const part = (w2, h2, d2, col) => new THREE.Mesh(
       new THREE.BoxGeometry(w2, h2, d2),
@@ -1871,9 +2045,9 @@ function buildDatacentre() {
       spot.position.set(x, y - 0.2, z);
       const aim = new THREE.Object3D();
       aim.position.copy(litTarget);
-      g.add(aim);
+      host.add(aim);
       spot.target = aim;
-      g.add(spot);
+      host.add(spot);
       signLights.push({ spot, glass: glassMat });
     } else {
       body.add(part(0.30, 0.28, 0.62, 0xd8dcdf));
@@ -1901,51 +2075,49 @@ function buildDatacentre() {
     u.position.set(x, y, z);
     u.rotation.y = yaw;
     u.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    g.add(u);
+    host.add(u);
   };
 
-  const camY = 1.6 + H * 0.80;
-  const signY = 1.6 + H * 0.62;
-  // South: the sign spans +/-17, so the inner pair is over it and the outer is not.
-  for (const cx of [-34, 34]) unitAt(cx, camY, D / 2 + 0.1, 0, null);
-  for (const cx of [-12, 12]) {
-    unitAt(cx, camY, D / 2 + 0.1, 0, new THREE.Vector3(cx, signY, D / 2 + 1.0));
+  const camY = base + H * 0.84;
+  // South: cameras out at the ends, lamps over the sign.
+  for (const cx of [-W * 0.44, W * 0.30, W * 0.44]) unitAt(cx, camY, D / 2 + 0.1, 0, null);
+  for (const cx of [-W * 0.30, -W * 0.14]) {
+    unitAt(cx, camY, D / 2 + 0.1, 0, new THREE.Vector3(cx, signY, D / 2 + 1.1));
   }
-  // East: the sign spans +/-15, so both units are over it.
-  for (const cz of [-14, 10]) {
-    unitAt(W / 2 + 0.1, camY, cz, -Math.PI / 2, new THREE.Vector3(W / 2 + 1.0, signY, cz));
+  for (const cz of [-14, 12]) {
+    unitAt(W / 2 + 0.1, camY, cz, -Math.PI / 2, new THREE.Vector3(W / 2 + 1.1, signY, cz));
   }
-  // West has no sign.
-  for (const cz of [-10, 14]) unitAt(-W / 2 - 0.1, camY, cz, Math.PI / 2, null);
+  for (const cz of [-24, 24]) unitAt(-W / 2 - 0.1, camY, cz, Math.PI / 2, null);
 
   // Yard lights.  // Yard lights. A working site is lit at night, and the apron is the one place
   // in this world with a reason to be. Poles with a head each, and a point light
   // that comes up as the daylight goes — no shadows from them, which is what
   // keeps six of them affordable.
-  for (const [lx, lz] of [[-W / 2 - 12, -D / 2 - 4], [-W / 2 - 12, D / 2 + 4],
-                          [0, D / 2 + 8], [0, -D / 2 - 8],
-                          [W / 2 + 10, -D / 2 - 4], [W / 2 + 10, D / 2 + 4]]) {
-    put(box(0.3, 7.0, 0.3, 0x3d4145, 0), lx, APRON_H + 3.5, lz, false);
+  for (const [lx, lz] of [[-W / 2 - 13, -D / 2 + 12], [-W / 2 - 13, D / 2 - 12],
+                          [-W * 0.22, D / 2 + 9], [W * 0.22, D / 2 + 9],
+                          [-W * 0.22, -D / 2 - 9], [W * 0.22, -D / 2 - 9],
+                          [W / 2 + 11, -D / 2 + 12], [W / 2 + 11, D / 2 - 12]]) {
+    put(box(0.3, 8.5, 0.3, 0x3d4145, 0), lx, APRON_H + 4.25, lz, false);
     const headMat = new THREE.MeshLambertMaterial({
       color: 0x51565b, emissive: new THREE.Color(0xffd9a0), emissiveIntensity: 0,
     });
     const head = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.34, 0.8), headMat);
-    head.position.set(lx, APRON_H + 7.1, lz);
+    head.position.set(lx, APRON_H + 8.6, lz);
     g.add(head);
     const lamp = new THREE.PointLight(0xffd2a0, 0, 34, 2);
-    lamp.position.set(lx, APRON_H + 6.7, lz);
+    lamp.position.set(lx, APRON_H + 8.2, lz);
     g.add(lamp);
     yardLamps.push({ light: lamp, mat: headMat });
   }
 
   // Beacons. Emissive here is right, unlike on the path stones: these ARE
   // lights, and they should be the only thing of the building visible at night.
-  for (const [bx, bz] of [[-W / 2 + 2, -D / 2 + 2], [W / 2 - 2, -D / 2 + 2],
-                          [-W / 2 + 2, D / 2 - 2], [W / 2 - 2, D / 2 - 2]]) {
+  for (const [bx, bz] of [[-W / 2 + 3, -D / 2 + 3], [W / 2 - 3, -D / 2 + 3],
+                          [-W / 2 + 3, D / 2 - 3], [W / 2 - 3, D / 2 - 3]]) {
     const lamp = new THREE.Mesh(
       new THREE.SphereGeometry(0.55, 10, 8),
       new THREE.MeshLambertMaterial({ color: 0x8a2a20, emissive: new THREE.Color(0xff3b2a) }));
-    lamp.position.set(bx, 1.6 + H + 2.6, bz);
+    lamp.position.set(bx, base + H + 3.2, bz);
     g.add(lamp);
     beacons.push(lamp.material);
   }
@@ -1953,26 +2125,28 @@ function buildDatacentre() {
   g.position.set(DC.x, heightAt(DC.x, DC.z), DC.z);
   scene.add(g);
 
-  // The hall itself, as one rectangle rather than a chain of circles.
-  blockers.push({ x: DC.x, z: DC.z, hw: W / 2 + 1.2, hd: D / 2 + 1.2,
-                  top: heightAt(DC.x, DC.z) + 1.6 + H });
-
-  // The fence as a barrier: four rectangles, with the south run split either
-  // side of the gate.
-  const rail = (x, z, hw, hd) => blockers.push({ x: DC.x + x, z: DC.z + z, hw, hd,
-                                                 top: heightAt(DC.x, DC.z) + APRON_H + 2.6 });
-  rail(0, -fd, fw, 0.2);
-  rail(-fw, 0, 0.2, fd);
-  rail(fw, 0, 0.2, fd);
-  for (const sgn of [-1, 1]) {
-    const half = (fw - GATE) / 2;
-    rail(sgn * (GATE + half), fd, half, 0.2);
-  }
-
   return g;
 }
 
 const datacentre = buildDatacentre();
+
+// SEAMLESS MEANS NO LOAD AND NO CUT. Stepping through the door does not swap a
+// level; the roof and the two walls the camera looks through simply come off,
+// and the room is already there. A little hysteresis at the threshold so
+// standing in the doorway does not strobe the building on and off.
+function insideDC(x, z, pad) {
+  return Math.abs(x - DC.x) < DC.w / 2 - 1.4 + pad
+      && Math.abs(z - DC.z) < DC.d / 2 - 1.4 + pad;
+}
+function setIndoors(v) {
+  if (v === indoors) return;
+  indoors = v;
+  dcRoof.visible = !v;
+  dcNear.visible = !v;
+  renderer.shadowMap.needsUpdate = true;
+  applyLight();
+}
+setIndoors(false);
 
 // ------------------------------------------------------------- character ----
 const TARGET_H = 1.75;   // metres; the world is built at this scale
@@ -2646,6 +2820,7 @@ const RESPAWN_AFTER = 3.4;
 // Close enough to be standing in the flames, not merely warming your hands.
 const BURN_R = 0.85, BURN_DPS = 26;
 let burnFlinch = 0;
+const ledCol = new THREE.Color();
 let jumpV = 0, airborne = false;
 const vel = new THREE.Vector3();
 let speed = 0;
@@ -2877,6 +3052,36 @@ function frame(now) {
   // BURNS. Standing in it costs you steadily rather than all at once, and the
   // flinch is on its own timer — playing HitRecieve every frame would restart
   // the clip sixty times a second, which is the stutter the stamina gate taught.
+  // Hysteresis: a metre and a half inside to enter, half a metre outside to
+  // leave, so the doorway is a threshold and not a switch.
+  setIndoors(indoors ? insideDC(pos.x, pos.z, 0.5) : insideDC(pos.x, pos.z, -1.5));
+
+  if (indoors && ledMesh) {
+    // A HUNDRED AND TWENTY OF FOUR THOUSAND EACH FRAME. Repainting every LED
+    // would mean re-uploading the whole instance colour buffer sixty times a
+    // second; touching a scattered handful looks exactly the same, because no
+    // eye tracks four thousand lights at once, and costs nothing.
+    for (let n = 0; n < 120; n++) {
+      const i = (Math.random() * ledCount) | 0;
+      const roll = Math.random();
+      // Mostly the steady green of something idling, occasionally amber, and
+      // very rarely the red that makes you look twice.
+      if (roll < 0.86) ledCol.setHSL(0.34 + Math.random() * 0.10, 0.80, 0.09 + Math.random() * 0.20);
+      else if (roll < 0.98) ledCol.setHSL(0.11, 0.88, 0.22 + Math.random() * 0.20);
+      else ledCol.setHSL(0.01, 0.90, 0.26 + Math.random() * 0.18);
+      ledMesh.setColorAt(i, ledCol);
+    }
+    ledMesh.instanceColor.needsUpdate = true;
+
+    // A couple of the strips are on their way out. Slow, and never a strobe.
+    const t = now * 0.001;
+    for (const s2 of stripMats) {
+      const base2 = 0.42 + 0.06 * Math.sin(t * 0.7 + s2.phase);
+      const fail = s2.bad ? (Math.sin(t * 2.3 + s2.phase) > 0.72 ? 0.16 : 1) : 1;
+      s2.mat.color.setRGB(0.62 * base2 * fail, 0.83 * base2 * fail, 0.87 * base2 * fail);
+    }
+  }
+
   if (fire && !dead) {
     const dx = pos.x - fire.x, dz = pos.z - fire.z;
     const inIt = dx * dx + dz * dz < BURN_R * BURN_R && pos.y - heightAt(fire.x, fire.z) < 1.4;

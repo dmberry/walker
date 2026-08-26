@@ -57,8 +57,15 @@ isometric lattice,
 `U` to step the overlay down a layer at a time, `M` and `8` `9` for the wind, `,` `.` to trim the walk pace (`SHIFT` with them
 for run) and `;` `'` for the size of the held weapon.
 
-A datacentre stands a hundred metres north, on ground levelled for it, with a
-trail running up to its gate. Your position and the time of day survive a
+A datacentre stands to the north — 168 x 78 x 17 m, on ground levelled for it,
+with a trail running up to its gate. It has a door, and walking through it puts
+you inside: raised-floor tiling, rows of cabinets with LEDs blinking out of step
+with each other, dim strips overhead with a couple of them failing, and the sun
+turned right down so the room is lit by its own machines.
+
+Nothing loads and nothing cuts. The roof and the two walls the camera looks
+through simply come off at the threshold, with a little hysteresis so standing
+in the doorway does not strobe the building. Your position and the time of day survive a
 reload; `R` puts both back to the start.
 
 A day runs in twenty minutes by default; `T` steps through 20, 45 and 7 and
