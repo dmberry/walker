@@ -68,6 +68,13 @@ rises east and sets west, its colour goes from orange at the horizon to warm
 white overhead, and the sky, the fog, the fill and the moon all read off the
 same clock. After dusk the campfire is the brightest thing in the world.
 
+On a touch screen it puts up a stick, a JUMP and a HIT, hides the key list and
+the diagnostics, and leaves the health bars as a strip along the bottom. The
+stick has a dead zone so a resting thumb does not walk him off, a radius limit
+that normalises its travel to 0..1, and it goes where your thumb lands rather
+than where it is drawn — its magnitude carries the gait too, so pushing to the
+rim runs. Two fingers pinch to zoom.
+
 Health and stamina are wired to what the world already does rather than shown
 for decoration: SHIFT spends stamina and drops back to a walk when it is gone,
 health returns only after a spell of not being hit, and at zero he goes down and

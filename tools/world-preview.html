@@ -14,6 +14,7 @@
 <head>
 <meta charset="utf-8">
 <meta http-equiv="cache-control" content="no-store">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Walker — world preview</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #8fb6c8;
@@ -100,6 +101,92 @@
   #about .row b { color: #e6dcc4; font-weight: normal; }
   #about a { color: #9db284; }
   #about .dismiss { margin-top: 18px; font-size: 10px; color: #7e8d96; }
+  /* Touch controls. Hidden unless the pointer is coarse, so a desktop never
+     sees them and a phone never has to hunt for a keyboard. */
+  #touch { display: none; }
+  body.coarse #touch { display: block; }
+  /* On a phone the diagnostics are noise and the screen is small: the key list,
+     the clip readout and the frame stats all go, and what is left is the health
+     bars along the bottom and the title. */
+  body.coarse #help,
+  body.coarse #hud,
+  body.coarse #perf { display: none !important; }
+  /* The bars become a strip across the very bottom edge and the controls sit
+     above it. A centred panel had the stick over one end of it and HIT over the
+     other, which is what happens when two things both want the same corner. */
+  body.coarse #vitals {
+    left: 0; right: 0; bottom: 0; transform: none; min-width: 0;
+    border-radius: 0; padding: 7px 12px calc(7px + env(safe-area-inset-bottom));
+    display: flex; gap: 14px; opacity: 1 !important;
+    /* Solid enough to read over bright grass. It is the one panel left on a
+       phone, so it does not have to defer to anything. */
+    background: rgba(10, 14, 19, 0.66);
+    border-top: 1px solid rgba(255, 255, 255, 0.10);
+  }
+  body.coarse #vitals .bar { height: 6px; background: rgba(255, 255, 255, 0.16); }
+  body.coarse #vitals .tag { color: #a9b8c2; font-size: 9px; }
+  body.coarse #vitals .num { color: #d3dee5; font-size: 9px; }
+  body.coarse #vitals .row { flex: 1; }
+  body.coarse #vitals .row + .row { margin-top: 0; }
+  body.coarse #stick { bottom: 50px; }
+  body.coarse #btnJump { bottom: 124px; }
+  body.coarse #btnHit { bottom: 60px; }
+  body.coarse #touchZone { bottom: 44px; height: 58vh; }
+  /* The half of the screen the stick answers to. Invisible, and it sits under
+     the buttons so a tap on JUMP is not also a shove on the stick. */
+  #touchZone {
+    position: fixed; left: 0; bottom: 0; width: 55vw; height: 62vh;
+    touch-action: none; z-index: 1;
+  }
+  /* Borders inside the box. Without this the knob's 2px border sits outside
+     its 62px width, so the -31px centring offset is 2px short and it rests up
+     and to the left of the ring it is supposed to sit in the middle of. */
+  #stick, #knob, .tbtn { box-sizing: border-box; }
+  #stick {
+    position: fixed; left: 22px; bottom: 22px; width: 132px; height: 132px;
+    z-index: 2; pointer-events: none; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 38%, rgba(96,116,136,0.13), rgba(10,14,20,0.17) 72%);
+    border: 1px solid rgba(206, 222, 236, 0.20);
+    box-shadow: inset 0 0 22px rgba(0,0,0,0.22), 0 2px 10px rgba(0,0,0,0.20);
+    backdrop-filter: blur(4px);
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  /* The four direction marks, set just inside the ring. */
+  #stick .dir {
+    position: absolute; width: 0; height: 0; opacity: 0.40;
+    border: 7px solid transparent;
+  }
+  #stick .dir.n { top: 9px;    left: 50%; margin-left: -7px; border-bottom-color: #cfe0ee; border-top-width: 0; }
+  #stick .dir.s { bottom: 9px; left: 50%; margin-left: -7px; border-top-color: #cfe0ee;    border-bottom-width: 0; }
+  #stick .dir.w { left: 9px;   top: 50%;  margin-top: -7px;  border-right-color: #cfe0ee;  border-left-width: 0; }
+  #stick .dir.e { right: 9px;  top: 50%;  margin-top: -7px;  border-left-color: #cfe0ee;   border-right-width: 0; }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 62px; height: 62px;
+    margin: -31px 0 0 -31px; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 34%,
+        rgba(168, 178, 188, 0.52) 0%,
+        rgba(118, 128, 138, 0.44) 58%,
+        rgba(88, 96, 105, 0.40) 100%);
+    border: 2px solid rgba(222, 236, 246, 0.58);
+    backdrop-filter: blur(2px);
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.25), 0 3px 10px rgba(0,0,0,0.32),
+                inset 0 2px 7px rgba(255,255,255,0.22);
+    pointer-events: none;
+  }
+  #stick.far #knob { border-color: rgba(246, 214, 154, 0.92); }
+  .tbtn {
+    position: fixed; width: 74px; height: 74px; border-radius: 50%;
+    background: rgba(13, 18, 24, 0.14); border: 1px solid rgba(255,255,255,0.16);
+    backdrop-filter: blur(2px); color: rgba(226, 236, 242, 0.72); font-size: 10px;
+    letter-spacing: 0.14em; display: grid; place-items: center;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  .tbtn:active { background: rgba(40, 52, 62, 0.45); color: #f0f6fa; }
+  .tbtn { z-index: 3; }
+  #btnJump { right: 26px; bottom: 96px; }
+  #btnHit  { right: 108px; bottom: 34px; }
   #err  { position: fixed; top: 12px; right: 12px; max-width: 40ch; color: #ffb0a0;
           background: rgba(40,12,12,0.85); padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; }
   b { color: #ffd79a; font-weight: normal; }
@@ -148,6 +235,15 @@
   <div class="row"><span class="tag">STA</span><span class="bar"><i id="stFill"></i></span><span class="num" id="stNum">100</span></div>
 </div>
 <div id="perf">&mdash;</div>
+<div id="touch">
+  <div id="touchZone"></div>
+  <div id="stick">
+    <i class="dir n"></i><i class="dir e"></i><i class="dir s"></i><i class="dir w"></i>
+    <div id="knob"></div>
+  </div>
+  <div class="tbtn" id="btnJump">JUMP</div>
+  <div class="tbtn" id="btnHit">HIT</div>
+</div>
 <div id="help">WASD move   SHIFT run
 [ ] turn camera   - = zoom   P ortho/persp
 1 sword  2 gun  0 unarmed   ; ' weapon size
@@ -1974,6 +2070,169 @@ function play(name, once = false, fade = 0.18) {
   if (once) locked = true;
 }
 
+// ------------------------------------------------------------------ touch ---
+// A stick rather than a d-pad, because the world is isometric and the eight
+// directions a pad gives you are the wrong eight. Its magnitude carries the
+// gait as well: push it to the rim and he runs, which saves a second button
+// and is how a thumb expects a stick to behave.
+//
+// `?touch` forces it on, so the layout can be checked without a phone.
+const coarse = matchMedia('(pointer: coarse)').matches
+            || new URLSearchParams(location.search).has('touch');
+if (coarse) document.body.classList.add('coarse');
+
+const stickVec = { x: 0, y: 0 };            // direction only, unit length
+let stickMag = 0;                           // 0 at the dead zone, 1 at the rim
+let stickRun = false;
+
+// DEAD ZONE, RADIUS LIMIT, AND DYNAMIC PLACEMENT.
+//
+// The dead zone is what stops a thumb resting on the glass from walking him
+// into a tree; below it the magnitude is zero rather than merely small, and
+// above it the remainder is stretched back over the full range so the first
+// degree of real movement is not wasted.
+//
+// The base is drawn where it rests, but a touch anywhere in the left half picks
+// it up and puts it under the thumb: static is easier to find, dynamic is
+// easier to use, and doing both costs one rule.
+const STICK_R = 48;                         // radius limit, in CSS pixels
+const STICK_DEAD = 0.14;                    // fraction of it that does nothing
+const STICK_RUN = 0.86;                     // and where the gait changes
+
+function bindStick() {
+  const pad = document.getElementById('stick');
+  const knob = document.getElementById('knob');
+  if (!pad) return;
+  let id = null, homeLeft = '', homeBottom = '';
+  let cx = 0, cy = 0;
+
+  const apply = (x, y) => {
+    let dx = x - cx, dy = y - cy;
+    const len = Math.hypot(dx, dy);
+    const clamped = Math.min(len, STICK_R);
+    if (len > 0) { dx = dx / len * clamped; dy = dy / len * clamped; }
+    knob.style.transform = 'translate(' + dx.toFixed(1) + 'px,' + dy.toFixed(1) + 'px)';
+
+    const raw = clamped / STICK_R;
+    stickMag = raw <= STICK_DEAD ? 0 : (raw - STICK_DEAD) / (1 - STICK_DEAD);
+    if (stickMag > 0 && len > 0) {
+      stickVec.x = dx / clamped;
+      stickVec.y = dy / clamped;
+    } else {
+      stickVec.x = stickVec.y = 0;
+    }
+    stickRun = raw > STICK_RUN;
+    pad.classList.toggle('far', stickRun);
+  };
+
+  const grab = (e) => {
+    if (id !== null) return;
+    // Second finger down is a pinch, not a stick grab.
+    if (e.isPrimary === false) return;
+    id = e.pointerId;
+    // Under the thumb, wherever that is — but never so close to an edge that
+    // half the travel is off the screen.
+    const half = STICK_R + 13;
+    const px = Math.max(half, Math.min(innerWidth * 0.55, e.clientX));
+    const py = Math.max(half, Math.min(innerHeight - half, e.clientY));
+    pad.style.left = (px - 66) + 'px';
+    pad.style.bottom = 'auto';
+    pad.style.top = (py - 66) + 'px';
+    cx = px; cy = py;
+    // No setPointerCapture. Move and release are already bound to the window, so
+    // capture buys nothing — and it throws if the pointer is not one the element
+    // owns, which takes the whole grab handler down with it.
+    apply(e.clientX, e.clientY);
+    e.preventDefault();
+  };
+
+  const move = (e) => { if (id === e.pointerId) apply(e.clientX, e.clientY); };
+
+  // `force` is for the cases where no pointerup ever arrives: the window loses
+  // focus, the tab is hidden, the browser takes the pointer away. Without it a
+  // lost finger pins the stick at full deflection and he walks into the horizon
+  // with nothing on screen to say why.
+  const release = (e, force) => {
+    if (!force && id !== null && e && e.pointerId !== id) return;
+    id = null;
+    stickVec.x = stickVec.y = 0;
+    stickMag = 0;
+    stickRun = false;
+    knob.style.transform = '';
+    pad.classList.remove('far');
+    pad.style.left = homeLeft;
+    pad.style.top = 'auto';
+    pad.style.bottom = homeBottom;
+  };
+
+  // Read AFTER the coarse class is on, so the home it returns to is the one
+  // the mobile rules actually put it at.
+  const cs = getComputedStyle(pad);
+  homeLeft = cs.left;
+  homeBottom = cs.bottom;
+
+  // The whole left half is the handle, not just the ring — a stick you have to
+  // hit is a stick you miss.
+  const zone = document.getElementById('touchZone');
+  zone.addEventListener('pointerdown', grab);
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', release);
+  addEventListener('pointercancel', (e) => release(e, true));
+  addEventListener('blur', () => release(null, true));
+  addEventListener('contextmenu', () => release(null, true));
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) release(null, true);
+  });
+
+  const tap = (id2, fn) => {
+    const el = document.getElementById(id2);
+    if (!el) return;
+    el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
+  };
+  tap('btnJump', () => { if (!airborne && !dead) { airborne = true; jumpV = JUMP_V; } });
+  tap('btnHit', () => {
+    if (!mixer || dead) return;
+    play(stance === 'gun' ? 'Gun_Shoot' : 'Sword_Slash', true, 0.08);
+  });
+}
+bindStick();
+
+// PINCH TO ZOOM, and only pinch: a single finger is the stick or a button, so
+// the gesture starts at two and ends the moment either lifts. The ratio of the
+// current span to the span it started at drives the same `dist` the -/= keys
+// do, so there is one zoom and two ways to reach it.
+function bindPinch() {
+  const live = new Map();
+  let startSpan = 0, startDist = 0;
+
+  const span = () => {
+    const [a, b] = [...live.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+
+  addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    live.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (live.size === 2) { startSpan = span(); startDist = dist; }
+  }, { passive: true });
+
+  addEventListener('pointermove', (e) => {
+    if (!live.has(e.pointerId)) return;
+    live.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (live.size !== 2 || startSpan <= 0) return;
+    // Fingers apart zooms IN, which is the way every map behaves.
+    dist = Math.max(3.5, Math.min(60, startDist * (startSpan / span())));
+  }, { passive: true });
+
+  const drop = (e) => {
+    live.delete(e.pointerId);
+    if (live.size < 2) startSpan = 0;
+  };
+  addEventListener('pointerup', drop, { passive: true });
+  addEventListener('pointercancel', drop, { passive: true });
+}
+bindPinch();
+
 // ------------------------------------------------------------------- chrome --
 // U steps the overlay down a layer at a time rather than switching all of it off
 // at once: the key list goes first because you stop needing it, then the clip
@@ -2336,11 +2595,22 @@ function frame(now) {
   const r = new THREE.Vector3(Math.cos(azi), 0, -Math.sin(azi));
   vel.set(0, 0, 0);
   if (!dead) {
-  if (held.has('w')) vel.add(f);
-  if (held.has('s')) vel.sub(f);
-  if (held.has('d')) vel.add(r);
-  if (held.has('a')) vel.sub(r);
+    if (held.has('w')) vel.add(f);
+    if (held.has('s')) vel.sub(f);
+    if (held.has('d')) vel.add(r);
+    if (held.has('a')) vel.sub(r);
+    // Screen up is forward, so the stick's y is subtracted.
+    if (stickMag > 0) {
+      vel.addScaledVector(f, -stickVec.y);
+      vel.addScaledVector(r, stickVec.x);
+    }
   }
+  // A stick held halfway should walk him at half a walk. Keys have no such
+  // middle, so they always run the throttle wide open.
+  const throttle = (stickMag > 0 && !held.has('w') && !held.has('a')
+                    && !held.has('s') && !held.has('d'))
+    ? 0.35 + 0.65 * Math.min(1, stickMag / STICK_RUN)
+    : 1;
 
   // WINDED IS A STATE, NOT A THRESHOLD. Gating the run on `stamina > 1` sets up
   // a limit cycle at the bottom of the bar: the last of it is spent, the gait
@@ -2350,10 +2620,10 @@ function frame(now) {
   // a quarter of it back.
   if (stamina <= 0.5) winded = true;
   else if (winded && stamina >= 25) winded = false;
-  const running = held.has('shift') && !winded && !dead;
+  const running = (held.has('shift') || stickRun) && !winded && !dead;
   const gait = running ? 'Run' : 'Walk';
   const pace = running ? runPace : walkPace;
-  const want = REFS[gait] * pace;
+  const want = REFS[gait] * pace * throttle;
   if (vel.lengthSq() > 0 && !locked) {
     vel.normalize().multiplyScalar(want);
     // Slide along a face rather than stopping dead against it: try the whole
@@ -2648,7 +2918,8 @@ function measureRef(clipName, samples = 240) {
   };
 }
 
-window.__dbg = { THREE, scene, key, moon, hemi, rim, renderer, ground, pos, measureRef, applyLight, sunAt, get tod(){ return tod; }, set tod(v){ tod = v; applyLight(); }, TRACKS, heightAt, blockers,
+window.__dbg = { THREE, scene, key, moon, hemi, rim, renderer, ground, pos, measureRef, applyLight, sunAt,
+                 get stick(){ return { mag: stickMag, x: stickVec.x, y: stickVec.y, run: stickRun }; }, get tod(){ return tod; }, set tod(v){ tod = v; applyLight(); }, TRACKS, heightAt, blockers,
                  get root(){ return root; }, get mixer(){ return mixer; }, get clips(){ return clips; } };
 // ------------------------------------------------------------- persistence --
 // Where he was and what time it was, kept across reloads. Only those: the world
