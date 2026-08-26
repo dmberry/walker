@@ -262,8 +262,6 @@ Open, in rough order of how much they would change:
   works locally with the packs in `_tmp/sprites/`.
 - **`reference/kenney/`** is sixteen PNGs of the sprites this replaced, kept for
   comparison and no longer referenced by anything.
-- **The directory is `clouds`, the repo is `walker`.** Renaming the directory
-  would break the local preview config in `.claude/launch.json`.
 
 ## Licence
 
