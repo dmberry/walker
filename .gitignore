@@ -9,3 +9,4 @@ _tmp/
 
 # Local preview config, carries absolute paths from this machine.
 .claude/
+node_modules/

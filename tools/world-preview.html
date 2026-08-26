@@ -352,7 +352,7 @@ let stepPhase = 0;
 // pace is the playback rate, the body travels at the clip's own measured speed
 // times that rate, and a planted foot is planted by construction rather than by
 // the references happening to be right.
-let walkPace = 1.30;
+let walkPace = 1.45;
 let runPace  = 1.65;
 // Rate scaling keeps the feet planted at any speed — stride length is fixed and
 // only the cycle time moves — so these bounds are about when it stops LOOKING
@@ -486,7 +486,15 @@ function applyLight() {
   // left the shaded side of the datacentre at about a sixth of the lit side and
   // reading as black. Bringing the key down and the sky up puts it near half,
   // which is what an overcast-ish day actually looks like.
-  key.intensity = 2.0 * Math.pow(day, 0.7);
+  // A LOWER KEY AND A HIGHER SKY, for the same lit surface and a much lighter
+  // shadow. Nothing in three.js r160 sets shadow darkness — light.shadow
+  // .intensity does not arrive until r163 — so a shadowed surface is simply one
+  // that has lost the sun and kept the sky. The only lever is the ratio between
+  // the two. At a 2.0 key against a 1.5 sky the ground behind the datacentre sat
+  // at half the lit ground, and the building throws a shadow a hundred metres
+  // long once the sun is off the top of its arc. 1.75 against 1.85 puts it near
+  // three fifths, and the lit side is within four per cent of where it was.
+  key.intensity = 1.75 * Math.pow(day, 0.7);
   key.color.copy(SUN_LOW).lerp(SUN_HIGH, Math.min(1, up * 2.6));
 
   // The moon takes over as the sun goes, from the opposite side of the sky.
@@ -500,10 +508,14 @@ function applyLight() {
   // it: you stood at the threshold and the whole landscape was a black wall.
   // A floor value keeps the yard, the fence and the hills readable without
   // pouring daylight into a hall that has never seen any.
-  hemi.intensity = indoors ? 0.85 : 0.20 + day * 1.30;
+  // The floor term is what the world has after dark and inside a shadow. At
+  // 0.20 that was almost nothing, so both read as black rather than as dim.
+  hemi.intensity = indoors ? 0.85 : 0.50 + day * 1.35;
   hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, day);
   hemi.groundColor.setHex(0x2a3024).lerp(new THREE.Color(0x6b7360), day);
-  rim.intensity = 0.12 + day * 0.46;
+  // The rim is not a shadow caster, so it fills too, and it is the only thing
+  // giving a shadowed vertical face any shape at all.
+  rim.intensity = 0.22 + day * 0.48;
 
   tmpCol.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_LOW, low * 0.75);
   if (indoors) tmpCol.setHex(0x121c27);

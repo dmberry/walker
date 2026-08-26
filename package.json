@@ -1,0 +1,13 @@
+{
+  "name": "walker",
+  "version": "0.101.0",
+  "private": true,
+  "description": "An isometric world for a three-dimensional character.",
+  "license": "GPL-3.0-or-later",
+  "author": "David M. Berry",
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'test/*.test.mjs'",
+    "mutants": "node test/mutants.mjs"
+  }
+}

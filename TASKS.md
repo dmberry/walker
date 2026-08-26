@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-16**.
+**Open**; the next free number is **W-19**.
 
 ## In progress
 
@@ -32,6 +32,11 @@ nostos laptop.
 
 ## Open
 
+- [ ] **W-18 · Extract more of the page into testable modules.** Collision
+      radii, the step-over rule, the trail walker and the clip-speed maths all
+      live inside `world-preview.html` and can only be guarded by reading the
+      source. The first two have gone wrong more than once and are worth pulling
+      out properly.
 - [ ] **W-09 · The apron outside the door** still reads as solid black from
       inside the hall. The room and the wider landscape are fixed; this band is
       not.
@@ -73,6 +78,23 @@ same as `tools/import-nature.py` does for the nature pack, and only the files
 actually loaded get copied out of `_tmp/`.
 
 ## Done
+
+- [x] **W-17** 2026-08-26 **Tests.** 48 of them, no dependencies, on Node's own
+      runner: `npm test`. `src/console-buffer.js` and `src/unix.js` are pure and
+      are tested directly. `world-preview.html` is one file that mostly needs a
+      GPU, so `invariants.test.mjs` reads the source and checks the numbers —
+      every assertion guards a bug that actually happened (the WCAG flash floor,
+      the signed shift in `hash2`, `shadow.bias`, the key-to-fill ratio, the
+      indoor sky, `.visible` vs intensity, stamina seconds, the derived door
+      width, the rack atlas). A guard whose constant has been renamed **fails**
+      rather than passing vacuously. `npm run mutants` puts each of those bugs
+      back one at a time and checks the suite notices: 8 of 8 caught.
+- [x] **W-16** 2026-08-26 **Shadows and walk speed.** r160 has no
+      `shadow.intensity`, so shadow darkness is purely the key-to-fill ratio.
+      Key 2.0 → 1.75 and sky floor 0.20 → 0.50 puts a shadow at 58 per cent of
+      lit ground instead of 50, and roughly doubles what the world has after
+      dark; the lit side moves 4 per cent. Walk pace 1.30 → 1.45, so 4.63 → 5.16
+      m/s.
 
 - [x] **W-08** 2026-08-26 **Doors.** Sliding leaves that part on approach were
       already there, built from boxes; they are `Door_Metal` from the MegaKit
