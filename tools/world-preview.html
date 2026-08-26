@@ -17,6 +17,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Walker — world preview</title>
 <style>
+  /* NOTHING HERE IS TEXT TO SELECT. A drag that starts on a panel selects its
+     label, and on iOS that leaves a blue highlight and a callout with no
+     obvious way to dismiss it mid-play. The about box is the exception: its URL
+     is there to be copied. */
+  html, body {
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
+  #about .card { -webkit-user-select: text; user-select: text; }
+
   /* The browser must not zoom the PAGE — that scales the layout while the
      canvas keeps its old backing store, which is the blur, and it moves the
      fixed controls outside the visual viewport, which is why they vanish. */
@@ -1210,7 +1220,9 @@ async function loadProp(name, dir = PROP_DIR) {
 // WoodLog is gone from here: at 0.34 m it is under the step height and the rule
 // above drops it anyway, but there is no point naming something as solid that
 // then is not.
-const SOLID = { Tent: 1.15, Bonfire: 0.5, PropaneTank: 0.26 };
+// The bonfire is deliberately NOT solid. Blocking it made it furniture; walking
+// into it is the point, and the burn below is what happens when you do.
+const SOLID = { Tent: 1.15, PropaneTank: 0.26 };
 
 function place(obj, x, z, height, yaw = 0, solid = 0) {
   const box = new THREE.Box3().setFromObject(obj);
@@ -1471,7 +1483,7 @@ function lightTheFire(group, x, z) {
   const light = new THREE.PointLight(0xff8a34, 7.5, 16, 2);
   light.position.set(x, heightAt(x, z) + 0.6, z);
   scene.add(light);
-  return { light, mats, base: 7.5 };
+  return { light, mats, base: 7.5, x, z };
 }
 
 // ------------------------------------------------------------ datacentre ----
@@ -2553,6 +2565,18 @@ function aim() {
 
 // iOS Safari ignores user-scalable=no, so the gesture has to be refused
 // directly. Two fingers belong to the game's own pinch, not to the page.
+// And refuse the selection itself, since CSS alone does not stop every path to
+// it — a long press, or a drag that began before the style applied. Any stray
+// selection is cleared on the next touch rather than left sitting there.
+document.addEventListener('selectstart', (e) => {
+  if (!e.target.closest || !e.target.closest('#about')) e.preventDefault();
+});
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.closest && e.target.closest('#about')) return;
+  const sel = getSelection();
+  if (sel && !sel.isCollapsed) sel.removeAllRanges();
+}, { passive: true });
+
 for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
   document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
 }
@@ -2599,6 +2623,9 @@ let hurtCooldown = 0, dead = false, deadFor = 0, winded = false;
 const STA_DRAIN = 19, STA_REGEN = 13, STA_REST = 24;
 const HP_REGEN = 5.5, HP_CALM = 5.0;
 const RESPAWN_AFTER = 3.4;
+// Close enough to be standing in the flames, not merely warming your hands.
+const BURN_R = 0.85, BURN_DPS = 26;
+let burnFlinch = 0;
 let jumpV = 0, airborne = false;
 const vel = new THREE.Vector3();
 let speed = 0;
@@ -2814,6 +2841,22 @@ function frame(now) {
     // still have visible work to do.
     const lit = Math.pow(1 - daylight, 1.4) * 0.55;
     for (const m of signs) m.emissiveIntensity = lit;
+  }
+
+  // BURNS. Standing in it costs you steadily rather than all at once, and the
+  // flinch is on its own timer — playing HitRecieve every frame would restart
+  // the clip sixty times a second, which is the stutter the stamina gate taught.
+  if (fire && !dead) {
+    const dx = pos.x - fire.x, dz = pos.z - fire.z;
+    const inIt = dx * dx + dz * dz < BURN_R * BURN_R && pos.y - heightAt(fire.x, fire.z) < 1.4;
+    if (inIt) {
+      health = Math.max(0, health - BURN_DPS * dt);
+      hurtCooldown = HP_CALM;
+      burnFlinch -= dt;
+      if (burnFlinch <= 0 && !locked) { burnFlinch = 0.85; play('HitRecieve', true, 0.06); }
+    } else {
+      burnFlinch = 0;
+    }
   }
 
   if (signLights.length) {
