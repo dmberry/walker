@@ -316,6 +316,16 @@ test('walking off an edge falls rather than teleports', () => {
     'the drop-to-fall conversion is gone; stepping off the deck snaps 6 m down');
 });
 
+test('the stay-indoors margin clears the wall blockers', () => {
+  // The walls stop the body 0.89 m inside the footprint. If the indoor
+  // hysteresis flips at anything tighter, pressing against the back wall puts
+  // the roof back on over your head — it lost by one centimetre once.
+  const m = grab(GAME, /indoors \? insideDC\(pos\.x, pos\.z, ([\d.]+)\)/,
+                 'the stay-indoors pad');
+  assert.ok(Number(m[1]) >= 1.1,
+    `stay-indoors pad ${m[1]}: the walls' blockers reach 0.89 inside the footprint`);
+});
+
 // ---- the rack faces ---------------------------------------------------------
 
 test('there is more than one cabinet in the hall', () => {

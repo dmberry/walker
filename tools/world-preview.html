@@ -4102,7 +4102,12 @@ function frame(now) {
 
   // Hysteresis: a metre and a half inside to enter, half a metre outside to
   // leave, so the doorway is a threshold and not a switch.
-  setIndoors(indoors ? insideDC(pos.x, pos.z, 0.5) : insideDC(pos.x, pos.z, -1.5));
+  // THE STAY-INSIDE MARGIN MUST CLEAR THE WALLS' OWN BLOCKERS. They stop the
+  // body 0.89 m inside the footprint, and the old exit test flipped outdoors at
+  // 0.90 — so pressing against the back wall lost by one centimetre and the
+  // roof dropped onto you. 1.2 leaves three tenths of clearance; leaving
+  // through the door still crosses the line long before the wall plane.
+  setIndoors(indoors ? insideDC(pos.x, pos.z, 1.2) : insideDC(pos.x, pos.z, -1.5));
 
   // The mezzanine reveal: a pale suggestion from below, solid once you are on
   // it. Driven by height, so it resolves as you climb the stairs rather than
