@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-23**.
+**Open**; the next free number is **W-24**.
 
 ## In progress
 
@@ -14,6 +14,11 @@ decimal (`W-06.3`). New work takes the next free number at the bottom of
 
 ## Open
 
+- [ ] **W-23 · Four terminals round the hall.** Each datacentre gets at least
+      four of the perched screens, spread round the hall. For now they can all
+      open the same shell; the placement should go in as a list of mount points
+      with a `station` id handed to `createTerminal`, so giving each its own
+      disk and host name later is filling in a stub rather than rewiring.
 - [ ] **W-19 · Dressing the elevation — REOPENED, rule changed.** Two rounds
       built straight into the world were both rejected on sight: a scatter of
       130 kit props, then stair cores, a louvre bank and a loading dock. The

@@ -1756,6 +1756,7 @@ const terminal = createTerminal({ clock: () => clockLabel().slice(0, 5) });
 let termTexture = null;         // repainted only while the caret moves
 let termSpot = null;            // where you have to stand
 let termActive = false;         // and whether you are using it
+const termClickables = [];      // what a click on the world can hit to open it
 const TERM_REACH = 4.5;
 // IN THE GROUND PLANE. termSpot.y is the local plinth height and pos.y is a
 // world height with the terrain under the building in it, so a 3D distance was
@@ -2180,15 +2181,17 @@ function buildDatacentre() {
       // ---- this cabinet's layout, worked out once so all six of its frames
       // ---- draw the same machines in the same places
       const units = [];
-      // Not every cabinet is filled to the top: some have empty U at the
-      // bottom, which is what a half-populated rack looks like.
-      const top = 4 + (rand() < 0.35 ? (1 + rand() * 2 | 0) * (U + 3) : 0);
-      for (let y = top; y + U < H2; y += U + 3) {
+      // EVERY SLOT FILLED. A third of the cabinets used to start a couple of
+      // rack units down, which was meant to read as a half-populated hall and
+      // read instead as machines missing from their racks. Full rows now; the
+      // hall's spare capacity is in the unpowered C rows of the inventory, not
+      // in gaps.
+      for (let y = 4; y + U < H2; y += U + 3) {
         const u = { y, v: 30 + rand() * 16 | 0, lamps: [] };
         units.push(u);
         // LESS IS MORE. Every socket filled reads as a Christmas tree; most of a
         // real rack front is dark metal and the lamps are the exception.
-        if (rand() < 0.32) continue;
+        if (rand() < 0.18) continue;
         const add = (x, y2, w, h, aMin, aSpan) => {
           // MOST LAMPS DO NOT BLINK. A steady lamp is lit in every frame, which
           // is what a power or link indicator does. A blinker gets its own
@@ -2335,7 +2338,12 @@ function buildDatacentre() {
   {
     const ROW_Z = 24.2, ROW_TOP = 2.35;      // the rack row and its height
     const tx = 4.3, tz = ROW_Z;
-    const SW = 2.10, SH = 1.35;
+    // THE PLANE TAKES ITS SHAPE FROM THE CANVAS. A hand-picked 2.10 x 1.35 was
+    // a different aspect from the texture on it, so every glyph was stretched
+    // wide in the world and snapped narrow again in the overlay — which is the
+    // jar you feel walking up. Width is chosen; height follows.
+    const SW = 2.10;
+    const SH = SW * terminal.canvas.height / terminal.canvas.width;
     const TILT = -0.16;                      // nodded toward the aisle
 
     const screenTex = new THREE.CanvasTexture(terminal.canvas);
@@ -2366,6 +2374,10 @@ function buildDatacentre() {
       new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }));
     screen.position.set(tx, SY, tz + 0.055);
     screen.rotation.x = TILT;
+    screen.name = 'terminalScreen';
+    // The click target is the whole assembly, not the picture: a 2 m screen
+    // four metres up-aisle subtends very little, so the bezel counts too.
+    termClickables.push(screen, bez);
     dcInterior.add(screen);
 
     // Stand in front of it, in the aisle on the door side.
@@ -3210,6 +3222,11 @@ termPanel.innerHTML = '<div class="tp-inner"><div class="tp-bar">'
   + '<span>ESC or <code>exit</code> to step away</span></div></div>';
 document.body.appendChild(termPanel);
 termPanel.querySelector('.tp-inner').appendChild(terminal.canvas);
+// A click on the dark around the panel steps away, same as ESC. On the panel
+// itself it does nothing — that is where you are working.
+termPanel.addEventListener('pointerdown', (e) => {
+  if (e.target === termPanel) closeTerm();
+});
 
 const termHint = document.createElement('div');
 termHint.id = 'termHint';
@@ -3324,9 +3341,21 @@ addEventListener('keyup', e => held.delete(e.key.toLowerCase()));
 
 // Click strikes. The canvas takes the mousedown so the page does not select
 // text behind it on a fast double.
+//
+// UNLESS THE CLICK IS ON THE TERMINAL. A raycast decides: pointing at the
+// screen from within reach opens it rather than swinging at it, which is also
+// the only way onto the terminal from a phone, where there is no E.
+const termRay = new THREE.Raycaster();
 canvas.addEventListener('mousedown', e => {
   if (e.button !== 0 || !mixer || dead) return;
   e.preventDefault();
+  if (termClickables.length && !termActive && nearTerminal()) {
+    const r = canvas.getBoundingClientRect();
+    termRay.setFromCamera(new THREE.Vector2(
+      ((e.clientX - r.left) / r.width) * 2 - 1,
+      -((e.clientY - r.top) / r.height) * 2 + 1), cam());
+    if (termRay.intersectObjects(termClickables, false).length) { openTerm(); return; }
+  }
   play(stance === 'gun' ? 'Gun_Shoot' : 'Sword_Slash', true, 0.08);
 });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
