@@ -154,7 +154,7 @@
 CLICK strike   SPACE jump
 E interact   V wave   H take a hit   X die
 SHIFT costs stamina; health returns once nothing has hit you
-L shading   K skip 3h   T clock speed / hold   G grid   SHIFT+R reset
+L shading   K skip 3h   T clock speed / hold   G grid   U hide panels   SHIFT+R reset
 M mute wind   8 9 wind level   I about
 , . walk pace   SHIFT , . run pace</div>
 <div id="err" hidden></div>
@@ -1974,6 +1974,28 @@ function play(name, once = false, fade = 0.18) {
   if (once) locked = true;
 }
 
+// ------------------------------------------------------------------- chrome --
+// U steps the overlay down a layer at a time rather than switching all of it off
+// at once: the key list goes first because you stop needing it, then the
+// diagnostic readouts, then everything but the title, then the title too. Four
+// presses gets you a clean frame for a screenshot and a fifth brings it back.
+const CHROME = [
+  { name: 'all',    hide: [] },
+  { name: 'no keys', hide: ['help'] },
+  { name: 'play',   hide: ['help', 'hud', 'perf'] },
+  { name: 'bare',   hide: ['help', 'hud', 'perf', 'vitals'] },
+  { name: 'clean',  hide: ['help', 'hud', 'perf', 'vitals', 'brand'] },
+];
+let chromeIdx = 0;
+
+function applyChrome() {
+  const hidden = new Set(CHROME[chromeIdx].hide);
+  for (const id of ['help', 'hud', 'perf', 'vitals', 'brand']) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = hidden.has(id) ? 'none' : '';
+  }
+}
+
 // ------------------------------------------------------------------- wind ---
 // SYNTHESISED, NOT SAMPLED. A wind loop would be the first asset this file has
 // needed and the first thing that could fail to load; filtered noise costs
@@ -2154,6 +2176,7 @@ addEventListener('keydown', e => {
   if (k === 'p') ortho = !ortho;
   if (k === 'g') grid.visible = !grid.visible;
   if (k === 'm') muted = !muted;
+  if (k === 'u') { chromeIdx = (chromeIdx + 1) % CHROME.length; applyChrome(); }
   // And reset wants intent, so it takes SHIFT with it.
   if (k === 'r' && e.shiftKey) resetToStart();
   if (k === 'i' || k === 'escape') about.classList.toggle('open', k === 'i' ? !about.classList.contains('open') : false);
@@ -2637,7 +2660,7 @@ function saveState() {
       x: +pos.x.toFixed(2), z: +pos.z.toFixed(2),
       yaw: root ? +root.rotation.y.toFixed(3) : 0,
       tod: +tod.toFixed(5), dayIdx, clockRunning,
-      dist: +dist.toFixed(2), azi: +azi.toFixed(3), ortho,
+      dist: +dist.toFixed(2), azi: +azi.toFixed(3), ortho, chromeIdx,
     }));
   } catch (e) { /* private browsing, or a full store. Not worth stopping for. */ }
 }
@@ -2660,6 +2683,8 @@ function restore(st) {
   if (typeof st.dist === 'number') dist = st.dist;
   if (typeof st.azi === 'number') azi = st.azi;
   if (typeof st.ortho === 'boolean') ortho = st.ortho;
+  if (Number.isInteger(st.chromeIdx) && st.chromeIdx < CHROME.length) chromeIdx = st.chromeIdx;
+  applyChrome();
   pendingYaw = typeof st.yaw === 'number' ? st.yaw : null;
   // AND THE CAMERA WITH HIM. The target eases toward the body every frame, so
   // restoring the position and not the target left the view starting at the
@@ -2676,6 +2701,7 @@ function resetToStart() {
   jumpV = 0; airborne = false;
   tod = 0.245; dayIdx = 0; clockRunning = true;
   dist = 11.0; azi = Math.PI / 4; ortho = true;
+  chromeIdx = 0; applyChrome();
   health = 100; stamina = 100; winded = false; dead = false;
   if (root) { root.rotation.set(0, 0, 0); root.position.copy(pos); }
   if (mixer) { mixer.stopAllAction(); current = null; locked = false; play('Idle', false, 0); }

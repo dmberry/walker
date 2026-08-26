@@ -54,7 +54,7 @@ the camera, `-` `=` to zoom, `P` for perspective instead of the 2:1
 orthographic, `1` `2` `0` for stance, `E` `V` `H` `X` for the one-shot clips,
 `L` for shading, `K` to skip three hours, `T` to hold the clock, `G` for the
 isometric lattice,
-`M` and `8` `9` for the wind, `,` `.` to trim the walk pace (`SHIFT` with them
+`U` to step the overlay down a layer at a time, `M` and `8` `9` for the wind, `,` `.` to trim the walk pace (`SHIFT` with them
 for run) and `;` `'` for the size of the held weapon.
 
 A datacentre stands a hundred metres north, on ground levelled for it, with a
