@@ -3057,7 +3057,11 @@ function hurt(amount) {
   hurtCooldown = HP_CALM;
   hurtFlash = 1;
 }
-const STA_DRAIN = 19, STA_REGEN = 13, STA_REST = 24;
+// A FULL BAR IS A SPRINT, NOT A DASH. At 19 a second the bar emptied in five
+// and a quarter, which is not long enough to get anywhere — the datacentre is a
+// hundred metres off and you were winded before the gate. 6.5 gives about
+// fifteen seconds flat out, which covers the walk north with something left.
+const STA_DRAIN = 6.5, STA_REGEN = 16, STA_REST = 30;
 const HP_REGEN = 5.5, HP_CALM = 5.0;
 const RESPAWN_AFTER = 3.4;
 // Close enough to be standing in the flames, not merely warming your hands.

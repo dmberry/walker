@@ -4,15 +4,38 @@
 <meta charset="utf-8">
 <title>Walker</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="0; url=tools/world-preview.html">
-<link rel="canonical" href="tools/world-preview.html">
+
+<meta property="og:title" content="Walker">
+<meta property="og:description" content="An isometric world for a three-dimensional character.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://dmberry.github.io/walker/">
+<meta property="og:image" content="https://dmberry.github.io/walker/assets/brand/share-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://dmberry.github.io/walker/assets/brand/share-card.png">
+
 <style>
-  html, body { margin: 0; height: 100%; background: #1a1f18; color: #cfd8c3;
-               display: grid; place-items: center; font: 14px ui-monospace, Menlo, monospace; }
+  html, body { margin: 0; height: 100%; background: #0b1118; color: #cfd8c3;
+               display: grid; place-items: center;
+               font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
   a { color: #9db284; }
+  .n { letter-spacing: 0.22em; color: #f2f6ee; font-size: 20px; }
 </style>
 </head>
 <body>
-<p>Walker &mdash; <a href="tools/world-preview.html">enter</a></p>
+<p><span class="n">WALKER</span><br><a id="go" href="tools/world-preview.html">enter</a></p>
+
+<script>
+// GITHUB PAGES SENDS cache-control: max-age=600, and a real header beats the
+// <meta http-equiv> the game page carries — browsers largely ignore that meta
+// anyway. So for ten minutes after every push, both the browser and the Fastly
+// edge keep serving the old build.
+//
+// A query string is a different cache key, so this always fetches the current
+// file. This page is 1 KB and its own ten-minute cache costs nothing; the game
+// page is the one that has to be fresh.
+var url = 'tools/world-preview.html?v=' + Date.now();
+document.getElementById('go').href = url;
+location.replace(url);
+</script>
 </body>
 </html>
