@@ -403,6 +403,20 @@ const interiorLights = [];
 // above it, because a `let` in the temporal dead zone throws on any access.
 const yardLamps = [];
 const signLights = [];
+// FLOODLIGHTS THAT ARE NOT LIGHTS. The datacentre's shaded elevations went
+// black, and the honest fix — a row of uplighters at the foot of each wall — is
+// the expensive one: three.js evaluates every visible light for every fragment,
+// and this scene was cut from 25 lights to 8 for exactly that reason. Ringing a
+// 168 m building with fixtures would put it all back.
+//
+// So the wall material does it instead. A term that falls off with height above
+// the plinth, added through totalEmissiveRadiance, which lands AFTER the
+// lighting calculation — so it cannot be shadowed away, which is the whole
+// point. It costs one varying and an exp, and no light at all.
+//
+// It runs low by day, where it stands in for bounce off the pale apron, and
+// comes up after dark when real fixtures would switch on.
+const UPLIGHT = { value: 0.4 };
 let fire = null;
 
 const hemi = new THREE.HemisphereLight(0xcfe4f2, 0x4a5240, 0.85);
@@ -540,6 +554,10 @@ function applyLight() {
   rim.visible = !indoors;
   moon.visible = !indoors && night > 0.02;
   hemi.visible = true;
+
+  // The wall wash. Low by day, where it reads as bounce off the apron; up after
+  // dark, where it reads as the fixtures at the foot of the wall coming on.
+  UPLIGHT.value = indoors ? 0 : 0.42 + night * 0.78;
 
   // Outside lights are only lights after dark.
   for (const y of yardLamps) y.light.visible = !indoors && night > 0.02;
@@ -1709,10 +1727,49 @@ function buildDatacentre() {
     t.repeat.set(Math.max(w, d) / tile, Math.max(h, d) / tile);
     return new THREE.MeshLambertMaterial({ color: col, map: t });
   };
+
+  // Where the walls stand, in world Y, so the shader knows where the ground is.
+  const footY = heightAt(DC.x, DC.z) + base;
+  const FLOOD_H = 7.5;          // how far up the wall the wash reaches
+
+  const floodlit = (mat) => {
+    // Warm, and dim: this is a wash on concrete, not a lamp pointed at camera.
+    mat.emissive = new THREE.Color(0xffd8a8);
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uUp = UPLIGHT;
+      sh.vertexShader = 'varying float vWallY;\n' + sh.vertexShader.replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\n\tvWallY = (modelMatrix * vec4(transformed, 1.0)).y;');
+      sh.fragmentShader = 'uniform float uUp;\nvarying float vWallY;\n'
+        + sh.fragmentShader
+        // A WALL THAT REFLECTS SIX PER CENT IS BLACK WHATEVER YOU SHINE AT IT.
+        // concrete.jpg averages 71 of 255, which is 0.06 once it is decoded to
+        // linear, and that is charcoal — real concrete returns twenty to forty
+        // per cent. So the datacentre's shaded elevations were not badly lit,
+        // they were correctly lit and almost perfectly absorbent, and every
+        // attempt to fix it by adding light was pushing on the wrong end.
+        //
+        // The texture is not repainted, because it is used elsewhere and
+        // because the grain is worth keeping: it is pulled toward a mid concrete
+        // grey and keeps 45 per cent of its own variation. Same trick as the
+        // path stones, and for the same reason — the fix wanted is less
+        // contrast WITHIN the texture, not more light on it.
+          .replace('#include <map_fragment>',
+            '#include <map_fragment>\n'
+          + '\tdiffuseColor.rgb = mix(vec3(0.34, 0.34, 0.33), diffuseColor.rgb, 0.45);')
+          .replace('#include <emissivemap_fragment>',
+            '#include <emissivemap_fragment>\n'
+          + '\tfloat wash = exp(-max(0.0, vWallY - ' + footY.toFixed(2) + ') / '
+          + FLOOD_H.toFixed(1) + ');\n'
+          + '\ttotalEmissiveRadiance *= uUp * wash * 0.34;');
+    };
+    return mat;
+  };
+
   const box = (w, h, d, col, tile = 4) => new THREE.Mesh(
     new THREE.BoxGeometry(w, h, d),
     tile === 0 ? new THREE.MeshLambertMaterial({ color: col, flatShading: true })
-               : clad(TEX_CONCRETE, w, h, d, col, tile));
+               : floodlit(clad(TEX_CONCRETE, w, h, d, col, tile)));
   const put = (m, x, y, z, solid = true, parent = g) => {
     m.position.set(x, y, z);
     m.castShadow = true;

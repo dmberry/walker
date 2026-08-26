@@ -133,6 +133,20 @@ test('lights are switched with visible, not with intensity', () => {
     + 'fragment whether it contributes or not');
 });
 
+test('the wall map is lifted off its own black floor', () => {
+  // concrete.jpg averages 71 of 255, which is 0.06 once decoded to linear. A
+  // surface returning six per cent is charcoal, and no amount of light makes it
+  // read as concrete — every attempt to fix the black elevations by adding fill
+  // was pushing on the wrong end of the equation.
+  const m = grab(GAME, /diffuseColor\.rgb = mix\(vec3\(([\d.]+), ([\d.]+), ([\d.]+)\), diffuseColor\.rgb, ([\d.]+)\)/,
+                 'the wall map lift');
+  const [target, keep] = [Number(m[1]), Number(m[4])];
+  const lifted = target * (1 - keep) + 0.06 * keep;
+  assert.ok(lifted > 0.15,
+    `lifted albedo is ${lifted.toFixed(3)} linear; concrete returns 0.2 to 0.4`);
+  assert.ok(keep >= 0.3, 'keep some of the grain or the wall reads as flat paint');
+});
+
 // ---- movement ---------------------------------------------------------------
 
 test('a full stamina bar is a sprint, not a dash', () => {
