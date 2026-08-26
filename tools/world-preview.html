@@ -1976,21 +1976,23 @@ function play(name, once = false, fade = 0.18) {
 
 // ------------------------------------------------------------------- chrome --
 // U steps the overlay down a layer at a time rather than switching all of it off
-// at once: the key list goes first because you stop needing it, then the
-// diagnostic readouts, then everything but the title, then the title too. Four
-// presses gets you a clean frame for a screenshot and a fifth brings it back.
+// at once: the key list goes first because you stop needing it, then the clip
+// and camera readout, then the frame stats.
+//
+// The title and the health bars are never hidden. One says what you are looking
+// at and the other is the only thing on screen you might need mid-stride, so
+// neither appears on any of these lists.
 const CHROME = [
-  { name: 'all',    hide: [] },
+  { name: 'all',     hide: [] },
   { name: 'no keys', hide: ['help'] },
-  { name: 'play',   hide: ['help', 'hud', 'perf'] },
-  { name: 'bare',   hide: ['help', 'hud', 'perf', 'vitals'] },
-  { name: 'clean',  hide: ['help', 'hud', 'perf', 'vitals', 'brand'] },
+  { name: 'play',    hide: ['help', 'hud'] },
+  { name: 'bare',    hide: ['help', 'hud', 'perf'] },
 ];
 let chromeIdx = 0;
 
 function applyChrome() {
   const hidden = new Set(CHROME[chromeIdx].hide);
-  for (const id of ['help', 'hud', 'perf', 'vitals', 'brand']) {
+  for (const id of ['help', 'hud', 'perf']) {
     const el = document.getElementById(id);
     if (el) el.style.display = hidden.has(id) ? 'none' : '';
   }
