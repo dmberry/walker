@@ -1797,15 +1797,42 @@ const exitGlow = [];
 // which is why it is handed one rather than reaching for Date.
 const terminal = createTerminal({ clock: () => clockLabel().slice(0, 5), os: DC_SPEC.os });
 let termTexture = null;         // repainted only while the caret moves
-let termSpot = null;            // where you have to stand
-let termActive = false;         // and whether you are using it
+// The one canvas texture, shared by every screen that shows this machine.
+// Lazy so screens built before the first caller still share the instance.
+function termScreenTex() {
+  if (!termTexture) {
+    termTexture = new THREE.CanvasTexture(terminal.canvas);
+    termTexture.colorSpace = THREE.SRGBColorSpace;
+    termTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  }
+  return termTexture;
+}
+// STATIONS, PLURAL (W-23). Every screen in the building that opens the
+// terminal is a station: where you stand, which way you face while using it,
+// and an id — the id is the stub for later, when stations stop sharing one
+// machine and each gets its own disk. For now they all open the same shell,
+// which is exactly what the task asked to stub.
+const termStations = [];        // { id, x, z, yaw }
+let termActive = false;         // whether the overlay is up
 const termClickables = [];      // what a click on the world can hit to open it
 const TERM_REACH = 4.5;
-// IN THE GROUND PLANE. termSpot.y is the local plinth height and pos.y is a
+// IN THE GROUND PLANE. A station's height is building-local and pos.y is a
 // world height with the terrain under the building in it, so a 3D distance was
 // never inside reach however close you stood — the hint simply never lit.
-const nearTerminal = () =>
-  termSpot && Math.hypot(pos.x - termSpot.x, pos.z - termSpot.z) < TERM_REACH;
+const nearestStation = () => {
+  let best = null, bd = TERM_REACH;
+  for (const st of termStations) {
+    // The distance is in the ground plane, but the FLOOR has to match: without
+    // the height gate the office stations lit their prompt for a body standing
+    // six metres below them on the hall floor, and E teleported him under a
+    // desk he could not see.
+    if (Math.abs(pos.y - st.y) > 2.5) continue;
+    const d = Math.hypot(pos.x - st.x, pos.z - st.z);
+    if (d < bd) { bd = d; best = st; }
+  }
+  return best;
+};
+const nearTerminal = () => nearestStation() !== null;
 const doorLeaves = [];
 let doorOpen = 0;      // 0 shut, 1 wide
 let ledMesh = null, ledCount = 0;
@@ -1818,7 +1845,30 @@ const LAYOUTS = 6;       // and how many different cabinets there are to be
 let ledFrame = null;     // which of them it is showing
 let mezzMats = [];       // every mezzanine material, for the reveal
 let mezzOpacity = 0.13;  // where the fade currently stands
-let mezzUp = false;      // whether the near walls are restored for the deck
+
+// WHICH WALL COMES DOWN FOLLOWS THE CAMERA, not a blanket rule. A wall is
+// stripped only while it actually stands between the camera and the player:
+// the camera sits at (sin azi, cos azi) of the target, so cos(azi) > 0 puts it
+// south of you — the south wall blocks — and sin(azi) > 0 puts it east. At the
+// default 45 both go; swing the camera to due east and the south wall stays,
+// which is most of what makes the interior read as a building rather than a
+// stage set. (The north and west walls are never stripped; from those
+// azimuths the interior is simply seen past them — a pre-existing limit.)
+let wallVisState = '';
+function updateWallVis(force) {
+  const camS = Math.cos(azi) > 0.25;
+  const camE = Math.sin(azi) > 0.25;
+  const near = !indoors || !camS;
+  const east = !indoors || !camE;
+  const key2 = near + ':' + east;
+  if (force || key2 !== wallVisState) {
+    wallVisState = key2;
+    dcNear.visible = near;
+    dcEast.visible = east;
+    dcGhost.visible = indoors && !near;
+    renderer.shadowMap.needsUpdate = true;
+  }
+}
 let ledAttr = null;      // the GPU-side view of ledFrame
 const flickerLights = [];
 
@@ -2398,10 +2448,7 @@ function buildDatacentre(spec) {
     const SH = SW * terminal.canvas.height / terminal.canvas.width;
     const TILT = -0.16;                      // nodded toward the aisle
 
-    const screenTex = new THREE.CanvasTexture(terminal.canvas);
-    screenTex.colorSpace = THREE.SRGBColorSpace;
-    screenTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    termTexture = screenTex;
+    const screenTex = termScreenTex();
 
     const SY = base + ROW_TOP + 0.18 + SH / 2;   // standing on the cabinet top
 
@@ -2433,7 +2480,8 @@ function buildDatacentre(spec) {
     dcInterior.add(screen);
 
     // Stand in front of it, in the aisle on the door side.
-    termSpot = new THREE.Vector3(DC.x + tx, 0, DC.z + tz + 1.6);
+    termStations.push({ id: 'hall-1', x: DC.x + tx, z: DC.z + tz + 1.6,
+                        y: heightAt(DC.x, DC.z) + base, yaw: Math.PI });
   }
 
   // ---- the mezzanine --------------------------------------------------------
@@ -2597,14 +2645,35 @@ function buildDatacentre(spec) {
     for (let room = 0; room < 3; room++) {
       const rx = MZ.x0 + 3 + room * 13;
       mzBox(0.18, PART_H, 12, 0xdcdcd6, rx, deckY + PART_H / 2, OZ - 6);
-      mzBox(6.4, 0.18, 2.9, 0xc9ccc7, rx + 6.5, deckY + 1.0, OZ - 3.6);
+      // TALLER, AND TURNED. The desks rise to 1.25, and the screens face
+      // NORTH — into the room, at the chair — instead of standing with their
+      // faces to the south wall, which from the deck read as monitor backs.
+      mzBox(6.4, 0.18, 2.9, 0xc9ccc7, rx + 6.5, deckY + 1.25, OZ - 3.6);
       for (const dx of [-2.9, 2.9]) {
-        mzBox(0.22, 0.92, 2.5, 0x6d757c, rx + 6.5 + dx, deckY + 0.46, OZ - 3.6);
+        mzBox(0.22, 1.17, 2.5, 0x6d757c, rx + 6.5 + dx, deckY + 0.585, OZ - 3.6);
       }
-      // Two dead screens on it, angled apart, and a chair pushed back.
-      for (const [dx, ry] of [[-1.6, 0.25], [1.2, -0.15]]) {
-        const scr = mzBox(2.0, 1.25, 0.10, 0x14181d, rx + 6.5 + dx, deckY + 1.85, OZ - 3.0);
-        scr.rotation.y = ry;
+      // One LIVE screen per room and one dead one, both turned to the chair.
+      // The live one carries the same canvas as every other station (W-23:
+      // shared machine now, per-station disks later).
+      {
+        const liveMat = new THREE.MeshBasicMaterial({
+          map: termScreenTex(), toneMapped: false, transparent: true, opacity: 0.13 });
+        mezzMats.push(liveMat);
+        const live = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 1.35), liveMat);
+        live.position.set(rx + 4.9, deckY + 2.15, OZ - 2.85);
+        live.rotation.y = Math.PI + 0.15;
+        mz.add(live);
+        const back = mzBox(2.12, 1.47, 0.10, 0x14181d, rx + 4.9, deckY + 2.15, OZ - 2.79);
+        back.rotation.y = Math.PI + 0.15;
+        termClickables.push(live, back);
+        // The mark is NORTH of the desk edge — at OZ-4.6 it sat inside the
+        // desktop and opening the terminal stood him on the furniture.
+        termStations.push({ id: 'office-' + (room + 1),
+                            x: DC.x + rx + 4.9, z: DC.z + OZ - 6.0,
+                            y: heightAt(DC.x, DC.z) + deckY, yaw: 0 });
+
+        const dead = mzBox(2.0, 1.25, 0.10, 0x14181d, rx + 8.1, deckY + 2.1, OZ - 2.9);
+        dead.rotation.y = Math.PI - 0.12;
       }
       mzBox(1.3, 0.16, 1.3, 0x3a4046, rx + 6.9, deckY + 0.62, OZ - 5.8);
       mzBox(1.3, 1.35, 0.18, 0x3a4046, rx + 6.9, deckY + 1.3, OZ - 6.4);
@@ -2985,9 +3054,7 @@ function setIndoors(v) {
   if (v === indoors) return;
   indoors = v;
   dcRoof.visible = !v;
-  dcNear.visible = !v || mezzUp;
-  dcEast.visible = !v || mezzUp;
-  dcGhost.visible = v && !mezzUp;
+  updateWallVis(true);
   renderer.shadowMap.needsUpdate = true;
   applyLight();
 }
@@ -3526,10 +3593,13 @@ function openTerm() {
   // and a swing leg reaches half a metre past the capsule, far enough to poke
   // through the rack face and be sliced by it. Using a terminal means standing
   // at it: he steps to the mark, faces the screen, and stands.
-  pos.x = termSpot.x;
-  pos.z = termSpot.z;
+  const st = nearestStation();
+  if (st) {
+    pos.x = st.x;
+    pos.z = st.z;
+    if (root) root.rotation.y = st.yaw;
+  }
   vel.set(0, 0, 0);
-  if (root) root.rotation.y = Math.PI;          // atan2(0, -1): facing north
   if (mixer) play('Idle', false, 0.12);
   termPanel.classList.add('open');
   termHint.classList.remove('on');
@@ -4046,26 +4116,14 @@ function frame(now) {
     // camera can see the hall floor — but from the deck they no longer stand
     // between the camera and you, and their absence reads as a hole in the
     // building. The roof stays off: it genuinely would block.
-    // THE SOUTH WALL ONLY COMES BACK WHERE IT DOES NOT BLOCK. The offices run
-    // along the deck's south side, and from the default camera the restored
-    // wall stood exactly between the lens and anyone in them. The east wall
-    // never blocks the west deck, so it returns whenever you are up; the south
-    // wall returns only while you are clear of the office strip.
-    const southClear = up && pos.z < DC.z + DC.d / 2 - 16;
-    if (up !== mezzUp || (indoors && dcNear.visible !== (!indoors || southClear))) {
-      mezzUp = up;
-      dcEast.visible = !indoors || up;
-      dcNear.visible = !indoors || southClear;
-      dcGhost.visible = indoors && !up;
-      renderer.shadowMap.needsUpdate = true;
-    }
   }
+  updateWallVis();
 
   // The terminal: the prompt when you are close enough to use it, and the caret,
   // which is the only thing on that screen that moves. The canvas is only pushed
   // to the GPU when it actually changed — a 780 by 640 upload every frame for a
   // block that blinks at 1.4 Hz would be most of the cost of the room.
-  if (termSpot) {
+  if (termStations.length) {
     const near = !termActive && !dead && nearTerminal();
     if (near !== termHint.classList.contains('on')) termHint.classList.toggle('on', near);
     if (terminal.tick(dt) && termTexture) termTexture.needsUpdate = true;
