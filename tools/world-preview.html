@@ -1786,7 +1786,9 @@ const TEX_SLAB = siteTex('slab.jpg', 1.9, 0.8);
 // rather than one box, because the roof has to come off when you are inside and
 // the south wall needs a hole in it.
 const dcRoof = new THREE.Group();     // stripped away indoors
-const dcNear = new THREE.Group();     // the two walls the camera looks through
+const dcNear = new THREE.Group();     // the south wall, door and sign
+const dcEast = new THREE.Group();     // the east wall — split out because the
+                                      // mezzanine restores them independently
 const dcInterior = new THREE.Group();
 const dcGhost = new THREE.Group();   // the near walls, as a hint, only indoors
 const exitGlow = [];
@@ -1973,7 +1975,7 @@ function buildDatacentre(spec) {
   // South and east are the near ones. They go into dcNear so they can be taken
   // away the moment you are inside, which is what makes it seamless: no load,
   // no cut, the building simply opens.
-  put(box(T, H, D, wallCol, 5), W / 2, base + H / 2, 0, true, dcNear);
+  put(box(T, H, D, wallCol, 5), W / 2, base + H / 2, 0, true, dcEast);
   // The south wall is in two pieces with a lintel over the gap between them.
   const seg = (W - DOOR_W) / 2;
   for (const sgn of [-1, 1]) {
@@ -2091,7 +2093,7 @@ function buildDatacentre(spec) {
     }
   }
   g.add(dcRoof);
-  g.add(true, dcNear);
+  g.add(dcNear, dcEast);
 
   // ---- the way out ----------------------------------------------------------
   // Taking the near walls away is what lets you see in, and it also takes away
@@ -2584,28 +2586,31 @@ function buildDatacentre(spec) {
     // ---- the offices ---------------------------------------------------------
     // Three rooms along the north side: stub partitions and furniture.
     const PART_H = 2.5;
-    // At the far end from the stairs: you land on open deck and the rooms are
-    // a walk away, which is also where looting will want them.
+    // On the SOUTH long side — the stairs land at the back wall on the north,
+    // so the rooms face them across the deck — and at the far end from the
+    // landing, which is where looting will want them.
+    //
+    // DOUBLED AGAIN. Real desk dimensions read as doll furniture at this
+    // camera, half-again read as side tables; at this scale a desk holds the
+    // frame the way the racks below do.
+    const OZ = MZ.z1;                    // the office wall line
     for (let room = 0; room < 3; room++) {
-      const rx = MZ.x0 + 3 + room * 10;
-      mzBox(0.18, PART_H, 10, 0xdcdcd6, rx, deckY + PART_H / 2, MZ.z0 + 5);
-      // A WORKSTATION, NOT A SIDE TABLE. Real desk dimensions read as doll
-      // furniture at this camera; interior props run about half as large again
-      // as life to hold their own.
-      mzBox(3.2, 0.14, 1.5, 0xc9ccc7, rx + 5, deckY + 0.86, MZ.z0 + 3);
-      for (const dx of [-1.4, 1.4]) {
-        mzBox(0.16, 0.80, 1.3, 0x6d757c, rx + 5 + dx, deckY + 0.40, MZ.z0 + 3);
+      const rx = MZ.x0 + 3 + room * 13;
+      mzBox(0.18, PART_H, 12, 0xdcdcd6, rx, deckY + PART_H / 2, OZ - 6);
+      mzBox(6.4, 0.18, 2.9, 0xc9ccc7, rx + 6.5, deckY + 1.0, OZ - 3.6);
+      for (const dx of [-2.9, 2.9]) {
+        mzBox(0.22, 0.92, 2.5, 0x6d757c, rx + 6.5 + dx, deckY + 0.46, OZ - 3.6);
       }
       // Two dead screens on it, angled apart, and a chair pushed back.
-      for (const [dx, ry] of [[-0.75, 0.25], [0.55, -0.15]]) {
-        const scr = mzBox(1.05, 0.65, 0.07, 0x14181d, rx + 5 + dx, deckY + 1.30, MZ.z0 + 2.7);
+      for (const [dx, ry] of [[-1.6, 0.25], [1.2, -0.15]]) {
+        const scr = mzBox(2.0, 1.25, 0.10, 0x14181d, rx + 6.5 + dx, deckY + 1.85, OZ - 3.0);
         scr.rotation.y = ry;
       }
-      mzBox(0.85, 0.10, 0.85, 0x3a4046, rx + 5.4, deckY + 0.55, MZ.z0 + 4.4);
-      mzBox(0.85, 0.95, 0.12, 0x3a4046, rx + 5.4, deckY + 1.0, MZ.z0 + 4.8);
-      mzBox(0.9, 1.55, 0.8, 0x767d84, rx + 9.2, deckY + 0.775, MZ.z0 + 1.8);
+      mzBox(1.3, 0.16, 1.3, 0x3a4046, rx + 6.9, deckY + 0.62, OZ - 5.8);
+      mzBox(1.3, 1.35, 0.18, 0x3a4046, rx + 6.9, deckY + 1.3, OZ - 6.4);
+      mzBox(1.4, 2.1, 1.1, 0x767d84, rx + 11.6, deckY + 1.05, OZ - 1.9);
     }
-    mzBox(0.18, PART_H, 10, 0xdcdcd6, MZ.x0 + 33, deckY + PART_H / 2, MZ.z0 + 5);
+    mzBox(0.18, PART_H, 12, 0xdcdcd6, MZ.x0 + 42, deckY + PART_H / 2, OZ - 6);
 
     dcInterior.add(mz);
 
@@ -2627,9 +2632,9 @@ function buildDatacentre(spec) {
     mb(MZ.x1, (MZ.z0 + GAP0) / 2, 0.25, (GAP0 - MZ.z0) / 2);      // east, north of the gap
     mb(MZ.x1, (GAP1 + MZ.z1) / 2, 0.25, (MZ.z1 - GAP1) / 2);      // east, south of it
     for (let room = 0; room < 3; room++) {
-      const rx = MZ.x0 + 3 + room * 10;
-      mb(rx, MZ.z0 + 5, 0.3, 5);                                  // partitions
-      mb(rx + 5, MZ.z0 + 3, 1.7, 0.8);                            // desks
+      const rx = MZ.x0 + 3 + room * 13;
+      mb(rx, MZ.z1 - 6, 0.3, 6);                                  // partitions
+      mb(rx + 6.5, MZ.z1 - 3.6, 3.3, 1.6);                        // desks
     }
     // And the stair sides, live only once you are off the floor.
     for (const dz of [-R.hw - 0.15, R.hw + 0.15]) {
@@ -2855,14 +2860,14 @@ function buildDatacentre(spec) {
   east.rotation.y = Math.PI / 2;
   east.position.set(W / 2 + 0.65, signY, 0);
   east.receiveShadow = true;
-  dcNear.add(east);
+  dcEast.add(east);
 
   signs.push(southMat, eastMat);
 
   // Units on the south and east faces belong to dcNear, so they leave with the
   // walls they are bolted to rather than hanging in the air indoors.
   const unitAt = (x, y, z, yaw, litTarget) => {
-    const host = (yaw === 0 || yaw === -Math.PI / 2) ? dcNear : g;
+    const host = yaw === 0 ? dcNear : yaw === -Math.PI / 2 ? dcEast : g;
     const u = new THREE.Group();
     const part = (w2, h2, d2, col) => new THREE.Mesh(
       new THREE.BoxGeometry(w2, h2, d2),
@@ -2981,6 +2986,7 @@ function setIndoors(v) {
   indoors = v;
   dcRoof.visible = !v;
   dcNear.visible = !v || mezzUp;
+  dcEast.visible = !v || mezzUp;
   dcGhost.visible = v && !mezzUp;
   renderer.shadowMap.needsUpdate = true;
   applyLight();
@@ -4040,9 +4046,16 @@ function frame(now) {
     // camera can see the hall floor — but from the deck they no longer stand
     // between the camera and you, and their absence reads as a hole in the
     // building. The roof stays off: it genuinely would block.
-    if (up !== mezzUp) {
+    // THE SOUTH WALL ONLY COMES BACK WHERE IT DOES NOT BLOCK. The offices run
+    // along the deck's south side, and from the default camera the restored
+    // wall stood exactly between the lens and anyone in them. The east wall
+    // never blocks the west deck, so it returns whenever you are up; the south
+    // wall returns only while you are clear of the office strip.
+    const southClear = up && pos.z < DC.z + DC.d / 2 - 16;
+    if (up !== mezzUp || (indoors && dcNear.visible !== (!indoors || southClear))) {
       mezzUp = up;
-      dcNear.visible = !indoors || up;
+      dcEast.visible = !indoors || up;
+      dcNear.visible = !indoors || southClear;
       dcGhost.visible = indoors && !up;
       renderer.shadowMap.needsUpdate = true;
     }
