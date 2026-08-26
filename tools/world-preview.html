@@ -2055,7 +2055,12 @@ function footstep(onChalk, hard) {
   if (wind.ctx.currentTime - lastStepAt < 0.11) return;
   lastStepAt = wind.ctx.currentTime;
   const { ctx, stepBuf } = wind;
-  const t0 = ctx.currentTime;
+  // SCHEDULE AHEAD OF THE CLOCK, NOT ON IT. Automation set at exactly
+  // ctx.currentTime lands in a block the audio thread has already begun, so the
+  // first ramp point is skipped and the gain jumps from wherever it was — which
+  // is the sharp click. A frame and a half of lead time is enough that every
+  // event is scheduled before it is needed.
+  const t0 = ctx.currentTime + 0.02;
   const rnd = (a, b) => a + Math.random() * (b - a);
 
   footFlip = -footFlip;
@@ -2067,7 +2072,10 @@ function footstep(onChalk, hard) {
   const offset = Math.random() * Math.max(0.01, stepBuf.duration - 0.4);
 
   const out = ctx.createGain();
-  out.gain.value = 1;
+  // Not a hard 1: a bus that snaps to full and later vanishes is another edge
+  // for the same click to hide in.
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.linearRampToValueAtTime(1, t0 + 0.006);
   let tail = out;
   if (ctx.createStereoPanner) {
     const pan = ctx.createStereoPanner();
@@ -2086,6 +2094,7 @@ function footstep(onChalk, hard) {
     const f = ctx.createBiquadFilter();
     f.type = type; f.frequency.value = freq; f.Q.value = q;
     const env = ctx.createGain();
+    env.gain.cancelScheduledValues(t0);
     env.gain.setValueAtTime(0.0001, t0);
     // A slower attack takes the click off the front of it.
     env.gain.exponentialRampToValueAtTime(gain, t0 + rnd(0.010, 0.026));
