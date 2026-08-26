@@ -17,6 +17,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Walker — world preview</title>
 <style>
+  /* The browser must not zoom the PAGE — that scales the layout while the
+     canvas keeps its old backing store, which is the blur, and it moves the
+     fixed controls outside the visual viewport, which is why they vanish. */
+  html, body { touch-action: none; overscroll-behavior: none; }
+  canvas { touch-action: none; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #8fb6c8;
                font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8eef2; }
   canvas { display: block; }
@@ -324,7 +329,6 @@ document.getElementById('infoBtn').addEventListener('click', (e) => {
   about.classList.toggle('open');
 });
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // THE SHADOW MAP IS NOT REDRAWN EVERY FRAME. Nothing in this world moves except
@@ -2547,11 +2551,30 @@ function aim() {
   moon.position.copy(snap).addScaledVector(sunAt(tod), -60);
 }
 
+// iOS Safari ignores user-scalable=no, so the gesture has to be refused
+// directly. Two fingers belong to the game's own pinch, not to the page.
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+document.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 1) e.preventDefault();
+}, { passive: false });
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+
 function resize() {
+  // Pixel ratio is re-read on every resize, not just once at startup: it changes
+  // when the page is zoomed or the window moves to another display, and a
+  // backing store built for the old one is exactly the blur it looks like.
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
   renderer.setSize(innerWidth, innerHeight);
   aim();
 }
 addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 120));
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', resize);
+  visualViewport.addEventListener('scroll', resize);
+}
 
 // -------------------------------------------------------------------- loop --
 const pos = new THREE.Vector3(0, 0, 4);
