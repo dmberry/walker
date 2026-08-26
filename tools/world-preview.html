@@ -379,6 +379,12 @@ const cam = () => ortho ? orthoCam : perspCam;
 // throws even under typeof, so a guard would not have saved it either.
 let indoors = false;
 const interiorLights = [];
+// These four are read by applyLight(), which runs at load — long before the
+// camp or the building exist. Anything applyLight touches has to be declared
+// above it, because a `let` in the temporal dead zone throws on any access.
+const yardLamps = [];
+const signLights = [];
+let fire = null;
 
 const hemi = new THREE.HemisphereLight(0xcfe4f2, 0x4a5240, 0.85);
 scene.add(hemi);
@@ -448,7 +454,6 @@ function applyLight() {
   // Indoors the sun is turned right down. With the roof off it would otherwise
   // pour daylight into a room that has never seen any, and the strips and the
   // LEDs — the only honest light in there — would count for nothing.
-  const inside = indoors ? 0.10 : 1;
   const up = Math.max(0, dir.y);                  // 0 at the horizon, 1 overhead
   const day = Math.min(1, up * 3.2);              // full daylight well before noon
   daylight = day;
@@ -462,19 +467,19 @@ function applyLight() {
   // left the shaded side of the datacentre at about a sixth of the lit side and
   // reading as black. Bringing the key down and the sky up puts it near half,
   // which is what an overcast-ish day actually looks like.
-  key.intensity = 2.0 * Math.pow(day, 0.7) * inside;
+  key.intensity = 2.0 * Math.pow(day, 0.7);
   key.color.copy(SUN_LOW).lerp(SUN_HIGH, Math.min(1, up * 2.6));
 
   // The moon takes over as the sun goes, from the opposite side of the sky.
   const night = 1 - day;
   // Enough moon to walk by. Pitch dark is accurate and unplayable.
-  moon.intensity = 0.42 * night * inside;
+  moon.intensity = 0.42 * night;
   moon.color.setHex(0x9fb6d8);
 
-  hemi.intensity = (0.20 + day * 1.30) * inside;
+  hemi.intensity = 0.20 + day * 1.30;
   hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, day);
   hemi.groundColor.setHex(0x2a3024).lerp(new THREE.Color(0x6b7360), day);
-  rim.intensity = (0.12 + day * 0.46) * inside;
+  rim.intensity = 0.12 + day * 0.46;
 
   tmpCol.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_LOW, low * 0.75);
   if (indoors) tmpCol.setHex(0x060a12);
@@ -482,12 +487,28 @@ function applyLight() {
   scene.fog.color.copy(tmpCol);
 
   // The room's own lighting, which only runs while you are in it.
-  // Point lamps get their level from the flicker each frame; this only has to
-  // switch them off when you leave, and carry the ambient.
+  // INTENSITY ZERO IS NOT OFF. three.js evaluates every visible light for every
+  // fragment whether it contributes anything or not — 25 lights were in the
+  // scene and 21 of them were dark. `visible` takes them out of the render
+  // state entirely. It costs a shader recompile when you cross the threshold,
+  // which is one hitch at a door against a permanent tax on every pixel.
   for (const l of interiorLights) {
-    if (l.isHemisphereLight) l.intensity = indoors ? 0.55 : 0;
-    else if (!indoors) l.intensity = 0;
+    l.visible = indoors;
+    if (l.isHemisphereLight) l.intensity = 0.55;
   }
+  // The sun does not reach in here. With the roof off it would otherwise pour
+  // daylight into a room that has never seen any, and the lamps — which are the
+  // only honest light in there, and are not even drawn — would count for
+  // nothing.
+  key.visible = !indoors;
+  rim.visible = !indoors;
+  moon.visible = !indoors && night > 0.02;
+  hemi.visible = !indoors;
+
+  // Outside lights are only lights after dark.
+  for (const y of yardLamps) y.light.visible = !indoors && night > 0.02;
+  for (const f of signLights) f.spot.visible = !indoors && night > 0.02;
+  if (fire) fire.light.visible = !indoors;
 }
 
 // Where the day has got to, for the readout.
@@ -1493,7 +1514,6 @@ const CAMP = [
   ['Raft',          -8.4,  -6.0, 0.34,  0.35],
 ];
 let propsLoaded = 0;
-let fire = null;
 for (const [name, x, z, h, yaw] of CAMP) {
   loadProp(name)
     .then(g => {
@@ -1536,8 +1556,6 @@ function lightTheFire(group, x, z) {
 // after dark.
 const beacons = [];
 const signs = [];
-const yardLamps = [];
-const signLights = [];
 const pilots = [];
 
 // Concrete and hazard panel, both David M. Berry's own CC0 work out of NostOS.
@@ -1868,8 +1886,17 @@ function buildDatacentre() {
   // SHORTER THAN HIM. At 2.2 the cabinets stood over the figure and you could
   // not see across the floor; 1.62 is just under his 1.75, so he reads as the
   // tallest thing in the room and the rows read as rows.
-  const rackGeo = new THREE.BoxGeometry(0.62, 1.62, 1.15);
-  const rackMat = new THREE.MeshLambertMaterial({ color: 0x14181d, flatShading: true });
+  // A real cabinet is 0.6 x 1.2 x 2.0 m and at this camera that reads as a
+  // paperback stood on end, so these are drawn well over life size. Taller than
+  // the figure now, which is also true of the real thing — you do not see over
+  // a row of racks, you see along it.
+  const rackGeo = new THREE.BoxGeometry(1.45, 2.35, 2.05);
+  // UNLIT ON PURPOSE. Seventeen hundred cabinets shaded by every visible lamp is
+  // a lot of fragment work for a near-black box that barely changes whatever
+  // falls on it. MeshBasicMaterial takes them out of the lighting calculation
+  // altogether; the room still reads because the floor is lit and the faces
+  // glow on their own.
+  const rackMat = new THREE.MeshBasicMaterial({ color: 0x0e1216 });
   // A CABINET IS A STACK OF MACHINES, and it should look like one. The column
   // is right at a distance but it was a single unbroken bar; what a rack
   // actually shows is fourteen or so units divided by dark gaps, each with its
@@ -1914,20 +1941,24 @@ function buildDatacentre() {
       c.fillStyle = 'rgba(90,110,135,0.18)';
       c.fillRect(6, y, W2 - 12, 1);
 
+      // LESS IS MORE. Every socket filled reads as a Christmas tree; most of a
+      // real rack front is dark metal and the lamps are the exception. Roughly
+      // a third of the machines show nothing at all.
+      if (rand() < 0.32) continue;
       // Indicators: a short run on the left, small and bright.
-      for (let k = 0; k < 5; k++) {
-        if (rand() < 0.18) continue;              // not every socket is filled
+      for (let k = 0; k < 3; k++) {
+        if (rand() < 0.45) continue;              // not every socket is filled
         c.fillStyle = pick() + (0.55 + rand() * 0.45).toFixed(2) + ')';
         c.fillRect(13 + k * 8, y + 10, 5, 7);
       }
       // Drive bays down the right: a column of small lamps, mostly blue.
-      for (let k = 0; k < 6; k++) {
-        if (rand() < 0.30) continue;
+      for (let k = 0; k < 3; k++) {
+        if (rand() < 0.55) continue;
         c.fillStyle = pick() + (0.40 + rand() * 0.50).toFixed(2) + ')';
         c.fillRect(W2 - 38 + k * 6, y + 12, 4, 5);
       }
       // And now and then a unit that is properly awake.
-      if (rand() < 0.10) {
+      if (rand() < 0.06) {
         c.fillStyle = pick() + '0.85)';
         c.fillRect(13, y + 26, W2 - 28, 3);
       }
@@ -1938,21 +1969,21 @@ function buildDatacentre() {
     return t;
   })();
 
-  const ledGeo = new THREE.PlaneGeometry(0.42, 1.40);
+  const ledGeo = new THREE.PlaneGeometry(1.05, 2.10);
   const ledMat = new THREE.MeshBasicMaterial({ map: faceTex, toneMapped: false });
 
   // TWO KINDS OF GAP. The aisles between rows are for reaching the cabinets;
   // the cross corridors between GROUPS are for crossing the hall, and without
   // them the floor is one uninterrupted wall of steel a hundred and fifty
   // metres long. Real halls are laid out in blocks for exactly this reason.
-  const GROUP_LEN = 13.5, CORRIDOR = 6.0;
+  const GROUP_LEN = 18.0, CORRIDOR = 7.0;
   const spots = [];
   const runs = [];
-  for (let z = -D / 2 + 12; z < D / 2 - 12; z += 5.2) {
+  for (let z = -D / 2 + 12; z < D / 2 - 12; z += 6.4) {
     for (let gx = -W / 2 + 11; gx < W / 2 - 11; gx += GROUP_LEN + CORRIDOR) {
       const x1 = Math.min(gx + GROUP_LEN, W / 2 - 11);
       if (x1 - gx < 2) continue;
-      for (let x = gx; x < x1; x += 0.68) spots.push([x, z]);
+      for (let x = gx; x < x1; x += 1.55) spots.push([x, z]);
       runs.push({ z, x0: gx, x1 });
     }
   }
@@ -1967,12 +1998,12 @@ function buildDatacentre() {
   const col = new THREE.Color();
   for (let i = 0; i < ledCount; i++) {
     const [x, z] = spots[i];
-    m4.position.set(x, base + 0.81, z);
+    m4.position.set(x, base + 1.18, z);
     m4.rotation.set(0, 0, 0);
     m4.updateMatrix();
     racks.setMatrixAt(i, m4.matrix);
     // The face panel, turned to look down the aisle.
-    m4.position.set(x, base + 0.86, z + 0.60);
+    m4.position.set(x, base + 1.20, z + 1.05);
     m4.rotation.set(0, 0, 0);
     m4.updateMatrix();
     ledMesh.setMatrixAt(i, m4.matrix);
@@ -1985,10 +2016,10 @@ function buildDatacentre() {
   // four thousand of them would be four thousand tests three times a frame; a
   // row is a continuous line of steel anyway and a rectangle says so exactly.
   {
-    const rowTop = heightAt(DC.x, DC.z) + base + 1.62;
+    const rowTop = heightAt(DC.x, DC.z) + base + 2.35;
     for (const r of runs) {
       blockers.push({ x: DC.x + (r.x0 + r.x1) / 2, z: DC.z + r.z,
-                      hw: (r.x1 - r.x0) / 2, hd: 0.62, top: rowTop });
+                      hw: (r.x1 - r.x0) / 2, hd: 1.06, top: rowTop });
     }
   }
   racks.instanceMatrix.needsUpdate = true;
@@ -2010,14 +2041,18 @@ function buildDatacentre() {
   // camera and the floor, which is no use to anybody. The room is lit by lamps
   // that are simply not drawn, and the flicker that used to be on the strips is
   // on the lamps instead, where it does the same work and is not in the way.
-  for (let i = -3; i <= 3; i++) {
-    const l = new THREE.PointLight(0x6f9fd8, 0, 86, 1.5);
-    l.position.set(i * (W / 7.5), base + H - 4.0, 0);
+  // Five, not seven. Each one is a full evaluation per lit fragment and the
+  // room is one big floor plane; two fewer is measurably cheaper and nobody can
+  // count them.
+  // Three, not five. What is left to light is the floor and the figure.
+  for (let i = -1; i <= 1; i++) {
+    const l = new THREE.PointLight(0x7ba8dc, 0, 140, 1.3);
+    l.position.set(i * (W / 3.4), base + H - 4.0, 0);
     dcInterior.add(l);
     interiorLights.push(l);
     // A couple of them are failing. Slow — a third of a hertz — so it reads as
     // a tube on its way out and never as a strobe.
-    flickerLights.push({ light: l, phase: rand() * 6.28, bad: rand() < 0.28, base: 26 });
+    flickerLights.push({ light: l, phase: rand() * 6.28, bad: rand() < 0.34, base: 64 });
   }
   const amb = new THREE.HemisphereLight(0x2a4560, 0x0a1119, 0);
   dcInterior.add(amb);
@@ -3138,7 +3173,8 @@ function frame(now) {
     // Moving, the body's shadow has to keep up frame by frame. Standing still it
     // is only the idle animation breathing, so every fifth frame is enough and
     // the terrain stops being redrawn into the depth map for nothing.
-    if (speed > 0 || airborne || locked || (frameNo % 5) === 0) renderer.shadowMap.needsUpdate = true;
+    // Nothing indoors casts a sun shadow, so there is nothing to redraw.
+    if (!indoors && (speed > 0 || airborne || locked || (frameNo % 5) === 0)) renderer.shadowMap.needsUpdate = true;
     root.position.copy(pos);
     // NO CLIMB CLIP EXISTS in either the 13-clip glb or the 24-clip source — the
     // pack ships Roll and nothing else off the flat. Pitching the body into the
@@ -3227,7 +3263,7 @@ function frame(now) {
     // The sun moves slowly enough that the depth map does not need redrawing
     // every frame, but it does need redrawing — the whole point of holding it
     // still was that nothing but the figure moved, and now the light does.
-    if ((frameNo % 6) === 0) renderer.shadowMap.needsUpdate = true;
+    if (!indoors && (frameNo % 6) === 0) renderer.shadowMap.needsUpdate = true;
   }
 
   updateWind(now * 0.001);

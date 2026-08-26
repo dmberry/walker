@@ -260,6 +260,11 @@ _tmp/            every pack in full. Nothing here ships.
 what texture size, so the import can be repeated rather than remembered.
 Everything is CC0 from Quaternius; each folder carries its licence.
 
+## Share card
+
+`assets/brand/share-card.png` is the Open Graph image: 600x315, flat, wordmark
+and BETA and nothing else. See `assets/brand/README.txt`.
+
 ## Flashing
 
 Every periodic light in the world was measured against WCAG 2.3.1, which allows
