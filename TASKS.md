@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-22**.
+**Open**; the next free number is **W-23**.
 
 ## In progress
 
@@ -32,6 +32,21 @@ nostos laptop.
 
 ## Open
 
+- [ ] **W-19 · Dressing the elevation — REOPENED, rule changed.** Two rounds
+      built straight into the world were both rejected on sight: a scatter of
+      130 kit props, then stair cores, a louvre bank and a loading dock. The
+      wall is bare again. **Rule: nothing gets added to the building without a
+      mock-up shown and approved first.**
+- [ ] **W-22 · The skirt does not look like the terrain it extends.** The coarse
+      ring beyond 146 m reads as a different place: darker, and its grass tiles
+      at a visibly different density, so the join is a hard diagonal seam. Two
+      causes. One texture is shared across all four strips, so a single
+      `repeat` value lands on strips of very different dimensions and the tiling
+      stretches. And the inner ground is a world-space colour canvas multiplied
+      by grass as *brightness only* at `DETAIL_TILE` 6 m, while the skirt is a
+      flat colour times the grass itself. The skirt should borrow the same
+      treatment: per-strip repeat in world units at 6 m, and a base colour taken
+      from the canvas rather than guessed.
 - [ ] **W-18 · Extract more of the page into testable modules.** Collision
       radii, the step-over rule, the trail walker and the clip-speed maths all
       live inside `world-preview.html` and can only be guarded by reading the
@@ -75,37 +90,6 @@ same as `tools/import-nature.py` does for the nature pack, and only the files
 actually loaded get copied out of `_tmp/`.
 
 ## Done
-
-- [x] **W-19** 2026-08-26 **Dressing the elevation, second attempt.** The first
-      scattered 130 small kit props and read as a texture made of plant. The
-      lesson was scale, not quantity: three large pieces of the building itself,
-      each obviously doing a job. Two stair cores standing proud and running the
-      full height, breaking the 168 m run into thirds; a 46 m louvre bank
-      between them with fifteen real tipped slats in a recessed reveal, in one
-      instanced call; and a loading bay with shutter, canopy and dock. All boxes,
-      so the lot costs a handful of draw calls.
-
-- [x] **W-21** 2026-08-26 **Terrain edge.** The detailed plane stopped dead at
-      150 m while fog reaches 215, so at the boundary you saw sky under the
-      horizon and the plane's own lit rim. A coarse skirt now extends to 600 m —
-      1200 m at 120 segments, 10 m to a quad against the inner plane's 0.94 —
-      reading the same `heightAt`, so the hills carry on across the join. It
-      sits 0.4 m low and the detailed plane wins on depth; the 40 cm lip at the
-      boundary is 150 m away under heavy fog.
-
-- [x] **W-20** 2026-08-26 **The texture bug under all the others.** `siteTex`
-      hands back a texture built on an 8x8 placeholder so callers get something
-      synchronously, then resizes the canvas when the image lands. Flagging
-      `needsUpdate` re-uploads level 0 into storage allocated for the
-      placeholder and leaves the mip chain above it dead. Only a texture that
-      minifies hard enough reaches those levels — the apron does, at a repeat of
-      82 by 45, and rendered pure `0,0,0` at midday with a white base colour and
-      a canvas measuring 186 of 255. The wall was dimmed by the same fault and
-      merely looked like dark concrete, which is what sent three earlier
-      attempts off chasing albedo. `dispose()` before `needsUpdate` fixes both:
-      apron 0 → 177, wall 96 → 130 and far more even. All the shader lifts are
-      gone; `siteTex`'s load-time gain is the only control.
-      Walk pace 1.45 → 1.62 (5.16 → 5.77 m/s) on top.
 
 - [x] **W-08b** 2026-08-26 **The door glitch, properly.** Not z-fighting.
       `shadowMap.autoUpdate` is off, so the map is baked on demand — and the

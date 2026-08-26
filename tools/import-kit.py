@@ -37,6 +37,7 @@ TEX_PX = 512
 MODELS = [
     ('Platforms', 'Door_Metal'),          # the sliding leaves
     ('Platforms', 'Door_Frame_Square'),   # and their frame
+    ('Props', 'Prop_AccessPoint'),        # the floor terminal in the hall
 ]
 
 

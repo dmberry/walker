@@ -313,6 +313,7 @@ M mute wind   8 9 wind level   I about
 
 import * as THREE from '../vendor/three.module.min.js';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
+import { createTerminal } from '../src/terminal.js';
 
 // THE VERSION LIVES HERE AND NOWHERE ELSE. It was written into the title and
 // into the about box separately, which is two places to remember and one to
@@ -1748,6 +1749,14 @@ const dcNear = new THREE.Group();     // the two walls the camera looks through
 const dcInterior = new THREE.Group();
 const dcGhost = new THREE.Group();   // the near walls, as a hint, only indoors
 const exitGlow = [];
+// The hall's access terminal. Built before the datacentre so the screen can
+// take its canvas at construction; the shell behind it reads the world clock,
+// which is why it is handed one rather than reaching for Date.
+const terminal = createTerminal({ clock: () => clockLabel().slice(0, 5) });
+let termTexture = null;         // repainted only while the caret moves
+let termSpot = null;            // where you have to stand
+let termActive = false;         // and whether you are using it
+const TERM_REACH = 4.5;
 const doorLeaves = [];
 let doorOpen = 0;      // 0 shut, 1 wide
 let ledMesh = null, ledCount = 0;
@@ -2007,74 +2016,10 @@ function buildDatacentre() {
     renderer.shadowMap.needsUpdate = true;
   });
 
-  // ---- what breaks up a hundred and sixty-eight metres --------------------
-  // The first attempt at this scattered a hundred and thirty small kit props
-  // across the wall — a vent every six metres, a service run, clamps between —
-  // and it read as a texture made of plant rather than plant on a building. The
-  // lesson was scale, not quantity: what a hall this size actually has on it is
-  // a few large pieces of the building itself, each obviously doing a job.
-  //
-  // Three, and they are all boxes, so the whole lot costs a handful of calls
-  // plus one instanced mesh for the slats.
-  {
-    const zS = D / 2;
-    const T2 = T / 2;
-    const stack = (w, h, d, col, tile, x, y, z, parent) =>
-      put(box(w, h, d, col, tile), x, y, z, false, parent);
-
-    // 1. TWO STAIR CORES, standing proud of the wall and running its full
-    // height. They break the run into thirds, which is what stops the eye
-    // reading the elevation as one endless slab. A hall this long has escape
-    // stairs whether you draw them or not.
-    for (const sgn of [-1, 1]) {
-      const cx = sgn * W * 0.27;
-      stack(9.5, H + 1.2, 5.5, 0xdcdcd6, 4, cx, base + (H + 1.2) / 2, zS + T2 + 2.7, dcNear);
-      // A capping band, so the core has a top rather than just stopping.
-      stack(10.3, 0.7, 6.3, 0x8d9298, 0, cx, base + H + 1.45, zS + T2 + 2.7, dcNear);
-      // The slot of glazing that says stair rather than lift shaft.
-      stack(1.5, H - 3.4, 0.3, 0x1b2530, 0, cx, base + (H - 1.0) / 2, zS + T2 + 5.5, dcNear);
-    }
-
-    // 2. A LOUVRE BANK between them, which is what the air actually comes
-    // through. A recessed reveal with real slats in it: at this camera a
-    // painted-on grille reads as a sticker, and slats catch the light.
-    const LB_W = 46, LB_H = 6.4, LB_Y = base + 7.6;
-    stack(LB_W, LB_H, 1.1, 0x4a5158, 0, 0, LB_Y, zS + T2 + 0.25, dcNear);   // the reveal
-    {
-      // ONE DRAW CALL FOR THE LOT. Sixty slats as separate meshes would be
-      // sixty objects for something you mostly read as a stripe.
-      const rows = 15;
-      const slatGeo = new THREE.BoxGeometry(LB_W - 1.0, 0.26, 0.7);
-      const slatMat = new THREE.MeshLambertMaterial({ color: 0xb9c0c6, flatShading: true });
-      const slats = new THREE.InstancedMesh(slatGeo, slatMat, rows);
-      slats.castShadow = false;
-      slats.receiveShadow = true;
-      const m4 = new THREE.Object3D();
-      for (let i = 0; i < rows; i++) {
-        m4.position.set(0, LB_Y - LB_H / 2 + 0.55 + i * ((LB_H - 1.1) / (rows - 1)),
-                        zS + T2 + 0.62);
-        m4.rotation.set(-0.42, 0, 0);          // tipped down, as a weather louvre is
-        m4.updateMatrix();
-        slats.setMatrixAt(i, m4.matrix);
-      }
-      slats.instanceMatrix.needsUpdate = true;
-      dcNear.add(slats);
-    }
-
-    // 3. THE LOADING BAY, off to one side of the door, with a canopy over it.
-    // Everything that is in this building arrived through something like this.
-    {
-      const bx = -W * 0.115;
-      stack(15.0, 5.6, 0.9, 0x3f464d, 0, bx, base + 2.8, zS + T2 + 0.2, dcNear);  // the opening
-      stack(13.4, 4.6, 0.35, 0x6d757c, 0, bx, base + 2.5, zS + T2 + 0.7, dcNear); // shutter
-      stack(16.4, 0.55, 4.6, 0xc9ccc7, 0, bx, base + 6.2, zS + T2 + 2.3, dcNear); // canopy
-      for (const dx of [-6.6, 6.6]) {
-        stack(0.4, 6.0, 0.4, 0x8d9298, 0, bx + dx, base + 3.0, zS + T2 + 4.4, dcNear);
-      }
-      // The dock itself: a raised slab you would back a lorry up to.
-      stack(15.6, 1.1, 4.2, 0xb6b6ae, 3, bx, base + 0.55, zS + T2 + 2.6, dcNear);
-    }
-  }
+  // The elevation stays bare. Two rounds of dressing it — first a scatter of
+  // 130 kit props, then stair cores, a louvre bank and a loading dock — were
+  // both rejected on sight. Anything proposed for this wall gets shown as a
+  // mock-up BEFORE it is built into the world. (W-19 in TASKS.md.)
 
   // Wall collision, with the doorway left open.
   const wallTop = heightAt(DC.x, DC.z) + base + H;
@@ -2372,6 +2317,53 @@ function buildDatacentre() {
                  : 2800 + rand() * 5000;                // all but asleep
   }
   dcInterior.add(racks, ledMesh);
+
+  // ---- the terminal ---------------------------------------------------------
+  // A floor console in the clear strip inside the door, before the first rack.
+  // The screen carries the terminal's own canvas as a texture, so what is on the
+  // console and what is in the overlay are the same pixels — there is no second
+  // copy of the state to fall out of step.
+  //
+  // TWICE THE SIZE IT WAS. At 86 cm across a room this dark it read as a black
+  // rectangle on a stick; you could not tell it was a screen, let alone a
+  // terminal. 1.7 m on a cabinet is a machine you can see from the door.
+  {
+    const tx = 6.2, tz = D / 2 - 9.0;
+    const SW = 1.70, SH = 1.18;              // the screen
+    const CAB_H = 0.95;                      // and what it stands on
+
+    // The cabinet. A plain box with a lighter top, which is what a floor console
+    // in a plant room actually is.
+    put(box(1.95, CAB_H, 0.85, 0x767d84, 0), tx, base + CAB_H / 2, tz, false, dcInterior);
+    put(box(2.05, 0.08, 0.95, 0xb2b8bd, 0), tx, base + CAB_H + 0.04, tz, false, dcInterior);
+    // A kick plate, so it does not look like it is floating.
+    put(box(1.75, 0.10, 0.70, 0x2c3238, 0), tx, base + 0.05, tz, false, dcInterior);
+
+    const screenTex = new THREE.CanvasTexture(terminal.canvas);
+    screenTex.colorSpace = THREE.SRGBColorSpace;
+    screenTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    termTexture = screenTex;
+
+    const TILT = -0.26;                      // tipped back, as a console is
+    const SY = base + CAB_H + 0.10 + SH / 2;
+
+    // The bezel first, then the picture standing proud of it.
+    const bez = new THREE.Mesh(
+      new THREE.BoxGeometry(SW + 0.16, SH + 0.16, 0.10),
+      new THREE.MeshLambertMaterial({ color: 0x22282f, flatShading: true }));
+    bez.position.set(tx, SY, tz + 0.06);
+    bez.rotation.x = TILT;
+    dcInterior.add(bez);
+
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(SW, SH),
+      new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }));
+    screen.position.set(tx, SY + 0.008, tz + 0.125);
+    screen.rotation.x = TILT;
+    dcInterior.add(screen);
+
+    termSpot = new THREE.Vector3(DC.x + tx, base, DC.z + tz);
+  }
 
   // ---- the light that makes it feel wrong ----------------------------------
   // NO VISIBLE STRIP LIGHTS. They were there, long bars at ceiling height — and
@@ -3199,9 +3191,78 @@ addEventListener('keydown', armWind, { once: true });
 addEventListener('mousedown', armWind, { once: true });
 
 // ------------------------------------------------------------------ input ---
+// ---- using the terminal -----------------------------------------------------
+// The screen on the console is 86 cm wide at the far end of a hall; you can see
+// that there is text on it and not a word of what it says. So E puts the same
+// canvas up full size. Same canvas, not a copy: the overlay is the texture's own
+// image element moved into a panel, which is why the two can never disagree.
+const termPanel = document.createElement('div');
+termPanel.id = 'termPanel';
+termPanel.innerHTML = '<div class="tp-inner"><div class="tp-bar">'
+  + 'ncds-hal-01 &middot; hall 1 floor access'
+  + '<span>ESC or <code>exit</code> to step away</span></div></div>';
+document.body.appendChild(termPanel);
+termPanel.querySelector('.tp-inner').appendChild(terminal.canvas);
+
+const termHint = document.createElement('div');
+termHint.id = 'termHint';
+termHint.textContent = 'E  ACCESS TERMINAL';
+document.body.appendChild(termHint);
+
+const termStyle = document.createElement('style');
+termStyle.textContent = `
+  #termPanel { position: fixed; inset: 0; display: none; z-index: 40;
+               background: rgba(4,7,11,0.82); place-items: center; }
+  #termPanel.open { display: grid; }
+  #termPanel .tp-inner { border: 1px solid #24323e; background: #060b10;
+                         box-shadow: 0 0 0 1px rgba(0,0,0,0.5), 0 24px 70px rgba(0,0,0,0.6); }
+  #termPanel canvas { display: block; max-width: min(94vw, 1100px); max-height: 78vh;
+                      width: auto; height: auto; }
+  #termPanel .tp-bar { display: flex; justify-content: space-between; gap: 2em;
+                       padding: 7px 12px; border-bottom: 1px solid #24323e;
+                       color: #6f8ea6; font: 11px/1.4 ui-monospace, Menlo, monospace;
+                       letter-spacing: 0.08em; text-transform: uppercase; }
+  #termPanel .tp-bar span { color: #4d6474; }
+  #termPanel code { color: #8fc6e8; text-transform: none; }
+  #termHint { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+              display: none; padding: 6px 14px; border: 1px solid rgba(143,198,232,0.4);
+              background: rgba(6,11,16,0.72); color: #cfe6f5; z-index: 30;
+              font: 12px/1.4 ui-monospace, Menlo, monospace; letter-spacing: 0.14em; }
+  #termHint.on { display: block; }
+`;
+document.head.appendChild(termStyle);
+
+function openTerm() {
+  if (termActive) return;
+  termActive = true;
+  terminal.reopen();
+  held.clear();                       // or you walk on after letting go
+  termPanel.classList.add('open');
+  termHint.classList.remove('on');
+  terminal.draw();
+}
+
+function closeTerm() {
+  if (!termActive) return;
+  termActive = false;
+  termPanel.classList.remove('open');
+}
+
 const held = new Set();
 let stance = 'none';            // none | sword | gun
 addEventListener('keydown', e => {
+  // THE TERMINAL TAKES EVERYTHING while it is up, including the chords the game
+  // would otherwise answer to and the ones the shell wants for itself (^C, ^U,
+  // ^L). It comes before the modifier guard below for exactly that reason.
+  if (termActive) {
+    if (terminal.key(e)) {
+      e.preventDefault();
+      if (termTexture) termTexture.needsUpdate = true;
+      if (terminal.isClosed()) closeTerm();
+    }
+    return;
+  }
+
   // COMMAND-R IS A RELOAD, NOT A KEY PRESS. The browser sends a plain keydown
   // for 'r' with the meta bit set, and reset used to fire on it — so every
   // refresh wiped the save on the way out. Nothing here should answer to a
@@ -3214,6 +3275,8 @@ addEventListener('keydown', e => {
   if (k === '-') dist = Math.min(30, dist * 1.14);
   if (k === '=' || k === '+') dist = Math.max(3.5, dist / 1.14);
   if (k === 'p') ortho = !ortho;
+  if (k === 'e' && termSpot && !dead
+      && pos.distanceTo(termSpot) < TERM_REACH) openTerm();
   if (k === 'g') grid.visible = !grid.visible;
   if (k === 'm') muted = !muted;
   if (k === 'u') { chromeIdx = (chromeIdx + 1) % CHROME.length; applyChrome(); }
@@ -3422,7 +3485,9 @@ function frame(now) {
   const f = new THREE.Vector3(-Math.sin(azi), 0, -Math.cos(azi));
   const r = new THREE.Vector3(Math.cos(azi), 0, -Math.sin(azi));
   vel.set(0, 0, 0);
-  if (!dead) {
+  // Standing at a terminal is standing still. The keys are going to the shell
+  // anyway; this stops a key that was already down from walking him off.
+  if (!dead && !termActive) {
     if (held.has('w')) vel.add(f);
     if (held.has('s')) vel.sub(f);
     if (held.has('d')) vel.add(r);
@@ -3643,6 +3708,16 @@ function frame(now) {
   // Hysteresis: a metre and a half inside to enter, half a metre outside to
   // leave, so the doorway is a threshold and not a switch.
   setIndoors(indoors ? insideDC(pos.x, pos.z, 0.5) : insideDC(pos.x, pos.z, -1.5));
+
+  // The terminal: the prompt when you are close enough to use it, and the caret,
+  // which is the only thing on that screen that moves. The canvas is only pushed
+  // to the GPU when it actually changed — a 780 by 640 upload every frame for a
+  // block that blinks at 1.4 Hz would be most of the cost of the room.
+  if (termSpot) {
+    const near = !termActive && !dead && pos.distanceTo(termSpot) < TERM_REACH;
+    if (near !== termHint.classList.contains('on')) termHint.classList.toggle('on', near);
+    if (terminal.tick(dt) && termTexture) termTexture.needsUpdate = true;
+  }
 
   if (indoors && ledMesh) {
     // A HUNDRED AND TWENTY OF FOUR THOUSAND EACH FRAME. Repainting every LED
