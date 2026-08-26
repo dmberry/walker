@@ -37,9 +37,6 @@ nostos laptop.
       live inside `world-preview.html` and can only be guarded by reading the
       source. The first two have gone wrong more than once and are worth pulling
       out properly.
-- [ ] **W-09 · The apron outside the door** still reads as solid black from
-      inside the hall. The room and the wider landscape are fixed; this band is
-      not.
 - [ ] **W-10 · A laptop for Walker to find.** At some point he picks one up, and
       the nostos mechanics come across with it: `unix.js` proper (pipes,
       redirect, `ed`/`pico`, man pages), the workspace, and a machine that is
@@ -78,6 +75,18 @@ same as `tools/import-nature.py` does for the nature pack, and only the files
 actually loaded get copied out of `_tmp/`.
 
 ## Done
+
+- [x] **W-09** 2026-08-26 **The black apron, and the elevation.** Same cause as
+      the wall: `slab.jpg` averages 98 of 255, which is 0.13 linear against the
+      0.3 paving actually returns. It passed in open sun and went black under the
+      roof's own shadow. One shared `lifted()` helper now does the wall, the
+      apron and the kit props. The elevation carries plant — one band of intake
+      vents, sparse extract fans, a service run and the uplighters the wall wash
+      is meant to come from — instanced, so about 130 pieces cost a handful of
+      draw calls. First pass was far too busy; cut to a quarter and desaturated
+      to grey, because the kit's red and orange trim reads as a spaceship.
+      Door leaf moved proud of the wall face: at +0.12 it sat inside the slab's
+      own half-thickness and slid through it, which was the flicker at the door.
 
 - [x] **W-17** 2026-08-26 **Tests.** 48 of them, no dependencies, on Node's own
       runner: `npm test`. `src/console-buffer.js` and `src/unix.js` are pure and

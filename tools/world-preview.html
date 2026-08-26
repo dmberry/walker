@@ -1732,6 +1732,33 @@ function buildDatacentre() {
   const footY = heightAt(DC.x, DC.z) + base;
   const FLOOD_H = 7.5;          // how far up the wall the wash reaches
 
+  // A SURFACE THAT RETURNS SIX PER CENT IS BLACK WHATEVER YOU SHINE AT IT. The
+  // site textures were authored dark: concrete.jpg averages 71 of 255 and
+  // slab.jpg 98, which decode to 0.06 and 0.13 linear. Real concrete returns
+  // 0.2 to 0.4 and paving about 0.3. So the black elevations and the black
+  // apron were never badly lit — they were correctly lit and nearly perfectly
+  // absorbent, and every attempt to fix them by adding light was pushing on the
+  // wrong end of the equation.
+  //
+  // The textures are not repainted: they are used elsewhere, and the grain is
+  // the point. Each is pulled toward a mid grey in the shader and keeps some of
+  // its own variation. Same trick as the path stones, for the same reason —
+  // what is wanted is less contrast WITHIN the texture, not more light on it.
+  const lifted = (mat, target, keep, grey = false) => {
+    mat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
+          '#include <map_fragment>\n'
+        + (grey
+            // The kit's atlases carry red and orange trim, which reads as a
+            // spaceship on the side of a datacentre. Straight to luminance.
+            ? '\tdiffuseColor.rgb = vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));\n'
+            : '')
+        + '\tdiffuseColor.rgb = mix(vec3(' + target.toFixed(2) + '), diffuseColor.rgb, '
+        + keep.toFixed(2) + ');');
+    };
+    return mat;
+  };
+
   const floodlit = (mat) => {
     // Warm, and dim: this is a wash on concrete, not a lamp pointed at camera.
     mat.emissive = new THREE.Color(0xffd8a8);
@@ -1742,18 +1769,6 @@ function buildDatacentre() {
         '#include <begin_vertex>\n\tvWallY = (modelMatrix * vec4(transformed, 1.0)).y;');
       sh.fragmentShader = 'uniform float uUp;\nvarying float vWallY;\n'
         + sh.fragmentShader
-        // A WALL THAT REFLECTS SIX PER CENT IS BLACK WHATEVER YOU SHINE AT IT.
-        // concrete.jpg averages 71 of 255, which is 0.06 once it is decoded to
-        // linear, and that is charcoal — real concrete returns twenty to forty
-        // per cent. So the datacentre's shaded elevations were not badly lit,
-        // they were correctly lit and almost perfectly absorbent, and every
-        // attempt to fix it by adding light was pushing on the wrong end.
-        //
-        // The texture is not repainted, because it is used elsewhere and
-        // because the grain is worth keeping: it is pulled toward a mid concrete
-        // grey and keeps 45 per cent of its own variation. Same trick as the
-        // path stones, and for the same reason — the fix wanted is less
-        // contrast WITHIN the texture, not more light on it.
           .replace('#include <map_fragment>',
             '#include <map_fragment>\n'
           + '\tdiffuseColor.rgb = mix(vec3(0.34, 0.34, 0.33), diffuseColor.rgb, 0.45);')
@@ -1786,9 +1801,14 @@ function buildDatacentre() {
   // ---- the apron, in real paving slabs --------------------------------------
   {
     TEX_SLAB.repeat.set((W + 30) / 2.4, (D + 30) / 2.4);
+    // AND THE APRON HAS THE SAME PROBLEM THE WALL HAD. slab.jpg averages 98 of
+    // 255, which is 0.13 in linear — better than concrete's 0.06 and still far
+    // under the 0.3 paving actually returns. In open sun it passed; under the
+    // roof's own shadow, which reaches most of the way to the fence when the sun
+    // is high, 0.13 times the fill is black. Same lift, same reason.
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(W + 30, 0.35, D + 30),
-      new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }));
+      lifted(new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }), 0.36, 0.5));
     put(m, 0, 0.17, 0, false);
   }
 
@@ -1908,12 +1928,110 @@ function buildDatacentre() {
       m.scale.setScalar(DOOR_SCALE);
       m.position.multiplyScalar(DOOR_SCALE);
       leaf.add(m);
-      leaf.position.set(sgn * DOOR_W / 4, base, D / 2 + 0.12);
+      // PROUD OF THE WALL, NOT INSIDE IT. At +0.12 the leaf sat within the
+      // wall's own half-thickness of 0.45, so as it slid open it travelled
+      // through the slab beside the doorway with its face all but coplanar —
+      // which is the flicker you get walking up to it. Industrial doors of this
+      // size run on the outside face anyway.
+      leaf.position.set(sgn * DOOR_W / 4, base, D / 2 + T / 2 + 0.14);
       dcNear.add(leaf);
       doorLeaves.push({ mesh: leaf, home: sgn * DOOR_W / 4, sgn });
     }
     renderer.shadowMap.needsUpdate = true;
   });
+
+  // ---- plant on the elevation ------------------------------------------------
+  // A datacentre elevation is mostly louvre. The wall was a clean slab a hundred
+  // and sixty-eight metres long, which reads as a warehouse; what makes it read
+  // as plant is intake banks, extract fans, a service run along the base, and
+  // the uplighters that the wall wash is supposed to be coming from.
+  //
+  // ONE DRAW CALL PER PART, NOT PER PROP. A hundred and thirty clones would be a
+  // hundred and thirty objects; each model's meshes become InstancedMeshes and
+  // the count stops mattering. The kit models carry two or three meshes each, so
+  // the whole elevation costs well under twenty calls.
+  const kitProp = (name, places, parent) => {
+    if (!places.length) return;
+    new GLTFLoader().load('../assets/kit/' + name + '.gltf', (g) => {
+      g.scene.updateMatrixWorld(true);
+      const parts = [];
+      g.scene.traverse(o => {
+        if (o.isMesh) parts.push({ geo: o.geometry, map: o.material.map || null,
+                                   local: o.matrixWorld.clone() });
+      });
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion();
+      const e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+      for (const part of parts) {
+        // Same Lambert as everything else, and the same lift off the black floor
+        // the kit's own atlases sit on — they run darker than concrete does.
+        // GREY. The kit's atlases carry red and orange trim, which is fine on a
+        // corridor in a spaceship and wrong bolted to a datacentre — the map
+        // goes to luminance and then gets the same lift off its black floor
+        // that the wall does.
+        const mat = lifted(new THREE.MeshLambertMaterial({ color: 0xb4bac0, map: part.map }),
+                           0.40, 0.55, true);
+        const im = new THREE.InstancedMesh(part.geo, mat, places.length);
+        im.castShadow = im.receiveShadow = true;
+        places.forEach((pl, i) => {
+          e.set(0, pl.ry || 0, 0);
+          q.setFromEuler(e);
+          v.set(pl.x, pl.y, pl.z);
+          sc.setScalar(pl.s || 1);
+          m.compose(v, q, sc).multiply(part.local);
+          im.setMatrixAt(i, m);
+        });
+        im.instanceMatrix.needsUpdate = true;
+        parent.add(im);
+      }
+      renderer.shadowMap.needsUpdate = true;
+    });
+  };
+
+  {
+    const zS = D / 2 + 0.30;                  // stood proud of the south wall
+    const xE = W / 2 + 0.30;                  // and of the east one
+    const clearsDoor = (x) => Math.abs(x) > DOOR_W / 2 + 2.4;
+    const along = (step, from, to) => {
+      const out = [];
+      for (let x = from; x <= to; x += step) out.push(x);
+      return out;
+    };
+
+    // ONE BAND, NOT TWO, AND SPACED OUT. The first pass put a vent every six
+    // metres on two levels, a pipe run every fifteen and a clamp between each —
+    // about a hundred and thirty pieces, which is not plant on a wall, it is a
+    // texture made of plant. What sells the elevation is a few things that
+    // clearly do a job, with bare concrete between them.
+    kitProp('Prop_Vent_Big',
+      along(21, -W / 2 + 14, W / 2 - 14).map(x => ({ x, y: base + 10.8, z: zS, s: 2.6 })),
+      dcNear);
+
+    // Extract fans, sparser still, and offset from the vents so the two do not
+    // line up into a row.
+    kitProp('Prop_Fan_Small',
+      along(42, -W / 2 + 30, W / 2 - 20).map(x => ({ x, y: base + 13.8, z: zS, s: 2.0 })),
+      dcNear);
+
+    // One service run along the base, well clear of the doorway.
+    kitProp('Prop_PipeHolder',
+      along(34, -W / 2 + 20, W / 2 - 16).filter(clearsDoor)
+        .map(x => ({ x, y: base + 3.1, z: zS, s: 1.5 })),
+      dcNear);
+
+    // THE FIXTURES THE WASH COMES FROM. The wall lightens toward its foot
+    // whether these are here or not, because that is a term in the material —
+    // but a wash with nothing making it is the sort of thing you notice without
+    // being able to say why. These stand on the apron and face the wall.
+    kitProp('Prop_Light_Floor',
+      along(19, -W / 2 + 12, W / 2 - 12).filter(clearsDoor)
+        .map(x => ({ x, y: base + 0.08, z: D / 2 + 1.5, s: 1.4 })),
+      dcNear);
+
+    // The east elevation is seen at an angle and never for long: two vents.
+    kitProp('Prop_Vent_Small',
+      along(26, -D / 2 + 16, D / 2 - 16).map(z => ({ x: xE, y: base + 10.2, z, ry: Math.PI / 2, s: 2.2 })),
+      dcNear);
+  }
 
   // Wall collision, with the doorway left open.
   const wallTop = heightAt(DC.x, DC.z) + base + H;

@@ -22,6 +22,19 @@ function grab(src, re, what) {
 }
 const num = (src, re, what) => Number(grab(src, re, what)[1]);
 
+// ---- does it even parse ------------------------------------------------------
+
+test('the game module parses', () => {
+  // The cheapest test here and the one that earns its keep most often: the page
+  // is three thousand lines of inline module, and a dropped brace shows up as a
+  // blank screen and a "loading..." that never clears. Imports are stripped
+  // because Function() is not a module scope; everything else is checked as-is.
+  const m = GAME.match(/<script type="module">([\s\S]*?)<\/script>/);
+  assert.ok(m, 'no module script in the page');
+  const body = m[1].replace(/^import .*$/gm, '');
+  assert.doesNotThrow(() => new Function(body));
+});
+
 // ---- WCAG 2.3.1: nothing flashes more than three times a second -------------
 
 test('the rack lamps cannot blink faster than three times a second', () => {
