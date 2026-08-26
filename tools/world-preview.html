@@ -1606,9 +1606,7 @@ function lightTheFire(group, x, z) {
 // Built from boxes rather than modelled, because what it needs to be is large,
 // rectilinear and repetitive — and because nothing in a CC0 nature kit is going
 // to supply one. The hall, a plinth it sits on, ranks of roof plant, chillers
-// down the flank, stacks, a perimeter fence, and beacons that only mean anything
-// after dark.
-const beacons = [];
+// down the flank, stacks and a perimeter fence.
 const signs = [];
 const pilots = [];
 
@@ -1744,7 +1742,18 @@ function buildDatacentre() {
   // the point. Each is pulled toward a mid grey in the shader and keeps some of
   // its own variation. Same trick as the path stones, for the same reason —
   // what is wanted is less contrast WITHIN the texture, not more light on it.
-  const lifted = (mat, target, keep, grey = false) => {
+  // GAIN AND OFFSET, NOT A MIX TOWARDS GREY. The first version blended the map
+  // toward a flat colour, which does lift the mean and also throws away the
+  // grain in proportion — at 45 per cent kept, on a texture whose whole range is
+  // 0.0002 to 0.2 linear, the wall came out as painted card and the apron as
+  // flat grey. Multiplying keeps every relative difference and widens it:
+  //
+  //   concrete  mean 0.06 -> 0.21, range 0.05..0.55   (gain 2.6, offset 0.05)
+  //   slab      mean 0.13 -> 0.29, range 0.04..0.51   (gain 1.9, offset 0.04)
+  //
+  // which is where concrete and paving actually sit, with more visible grain
+  // than the source had rather than less.
+  const lifted = (mat, gain, offset, grey = false) => {
     mat.onBeforeCompile = (sh) => {
       sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>',
           '#include <map_fragment>\n'
@@ -1753,8 +1762,8 @@ function buildDatacentre() {
             // spaceship on the side of a datacentre. Straight to luminance.
             ? '\tdiffuseColor.rgb = vec3(dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)));\n'
             : '')
-        + '\tdiffuseColor.rgb = mix(vec3(' + target.toFixed(2) + '), diffuseColor.rgb, '
-        + keep.toFixed(2) + ');');
+        + '\tdiffuseColor.rgb = diffuseColor.rgb * ' + gain.toFixed(2)
+        + ' + ' + offset.toFixed(3) + ';');
     };
     return mat;
   };
@@ -1771,7 +1780,7 @@ function buildDatacentre() {
         + sh.fragmentShader
           .replace('#include <map_fragment>',
             '#include <map_fragment>\n'
-          + '\tdiffuseColor.rgb = mix(vec3(0.34, 0.34, 0.33), diffuseColor.rgb, 0.45);')
+          + '\tdiffuseColor.rgb = diffuseColor.rgb * 2.60 + 0.050;')
           .replace('#include <emissivemap_fragment>',
             '#include <emissivemap_fragment>\n'
           + '\tfloat wash = exp(-max(0.0, vWallY - ' + footY.toFixed(2) + ') / '
@@ -1808,7 +1817,7 @@ function buildDatacentre() {
     // is high, 0.13 times the fill is black. Same lift, same reason.
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(W + 30, 0.35, D + 30),
-      lifted(new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }), 0.36, 0.5));
+      lifted(new THREE.MeshLambertMaterial({ color: 0xffffff, map: TEX_SLAB }), 1.90, 0.040));
     put(m, 0, 0.17, 0, false);
   }
 
@@ -1912,7 +1921,17 @@ function buildDatacentre() {
       if (!o.isMesh) return;
       const map = o.material.map || null;
       o.material = new THREE.MeshLambertMaterial({ color: 0x9aa3ab, map });
-      o.castShadow = o.receiveShadow = true;
+      // THE LEAVES CAST NOTHING, and this is the door glitch. The shadow map
+      // is baked on demand — renderer.shadowMap.autoUpdate is false, because
+      // re-rendering every caster in the scene sixty times a second is what it
+      // was turned off to avoid. The doors are the one thing here that moves
+      // continuously, so their shadows stayed where the leaves used to be and
+      // the panels slid out from under them as you walked up. Two ways out:
+      // rebake the whole map every frame the door is moving, or let a pair of
+      // thin panels cast nothing. They are 12 cm deep against a wall in its own
+      // shade, and nobody will miss it.
+      o.castShadow = false;
+      o.receiveShadow = true;
     });
 
     // Where the model's own origin sits is the kit's business, not ours: measure
@@ -1939,99 +1958,6 @@ function buildDatacentre() {
     }
     renderer.shadowMap.needsUpdate = true;
   });
-
-  // ---- plant on the elevation ------------------------------------------------
-  // A datacentre elevation is mostly louvre. The wall was a clean slab a hundred
-  // and sixty-eight metres long, which reads as a warehouse; what makes it read
-  // as plant is intake banks, extract fans, a service run along the base, and
-  // the uplighters that the wall wash is supposed to be coming from.
-  //
-  // ONE DRAW CALL PER PART, NOT PER PROP. A hundred and thirty clones would be a
-  // hundred and thirty objects; each model's meshes become InstancedMeshes and
-  // the count stops mattering. The kit models carry two or three meshes each, so
-  // the whole elevation costs well under twenty calls.
-  const kitProp = (name, places, parent) => {
-    if (!places.length) return;
-    new GLTFLoader().load('../assets/kit/' + name + '.gltf', (g) => {
-      g.scene.updateMatrixWorld(true);
-      const parts = [];
-      g.scene.traverse(o => {
-        if (o.isMesh) parts.push({ geo: o.geometry, map: o.material.map || null,
-                                   local: o.matrixWorld.clone() });
-      });
-      const m = new THREE.Matrix4(), q = new THREE.Quaternion();
-      const e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
-      for (const part of parts) {
-        // Same Lambert as everything else, and the same lift off the black floor
-        // the kit's own atlases sit on — they run darker than concrete does.
-        // GREY. The kit's atlases carry red and orange trim, which is fine on a
-        // corridor in a spaceship and wrong bolted to a datacentre — the map
-        // goes to luminance and then gets the same lift off its black floor
-        // that the wall does.
-        const mat = lifted(new THREE.MeshLambertMaterial({ color: 0xb4bac0, map: part.map }),
-                           0.40, 0.55, true);
-        const im = new THREE.InstancedMesh(part.geo, mat, places.length);
-        im.castShadow = im.receiveShadow = true;
-        places.forEach((pl, i) => {
-          e.set(0, pl.ry || 0, 0);
-          q.setFromEuler(e);
-          v.set(pl.x, pl.y, pl.z);
-          sc.setScalar(pl.s || 1);
-          m.compose(v, q, sc).multiply(part.local);
-          im.setMatrixAt(i, m);
-        });
-        im.instanceMatrix.needsUpdate = true;
-        parent.add(im);
-      }
-      renderer.shadowMap.needsUpdate = true;
-    });
-  };
-
-  {
-    const zS = D / 2 + 0.30;                  // stood proud of the south wall
-    const xE = W / 2 + 0.30;                  // and of the east one
-    const clearsDoor = (x) => Math.abs(x) > DOOR_W / 2 + 2.4;
-    const along = (step, from, to) => {
-      const out = [];
-      for (let x = from; x <= to; x += step) out.push(x);
-      return out;
-    };
-
-    // ONE BAND, NOT TWO, AND SPACED OUT. The first pass put a vent every six
-    // metres on two levels, a pipe run every fifteen and a clamp between each —
-    // about a hundred and thirty pieces, which is not plant on a wall, it is a
-    // texture made of plant. What sells the elevation is a few things that
-    // clearly do a job, with bare concrete between them.
-    kitProp('Prop_Vent_Big',
-      along(21, -W / 2 + 14, W / 2 - 14).map(x => ({ x, y: base + 10.8, z: zS, s: 2.6 })),
-      dcNear);
-
-    // Extract fans, sparser still, and offset from the vents so the two do not
-    // line up into a row.
-    kitProp('Prop_Fan_Small',
-      along(42, -W / 2 + 30, W / 2 - 20).map(x => ({ x, y: base + 13.8, z: zS, s: 2.0 })),
-      dcNear);
-
-    // One service run along the base, well clear of the doorway.
-    kitProp('Prop_PipeHolder',
-      along(34, -W / 2 + 20, W / 2 - 16).filter(clearsDoor)
-        .map(x => ({ x, y: base + 3.1, z: zS, s: 1.5 })),
-      dcNear);
-
-    // THE FIXTURES THE WASH COMES FROM. The wall lightens toward its foot
-    // whether these are here or not, because that is a term in the material —
-    // but a wash with nothing making it is the sort of thing you notice without
-    // being able to say why. These stand on the apron and face the wall.
-    kitProp('Prop_Light_Floor',
-      along(19, -W / 2 + 12, W / 2 - 12).filter(clearsDoor)
-        .map(x => ({ x, y: base + 0.08, z: D / 2 + 1.5, s: 1.4 })),
-      dcNear);
-
-    // The east elevation is seen at an angle and never for long: two vents.
-    kitProp('Prop_Vent_Small',
-      along(26, -D / 2 + 16, D / 2 - 16).map(z => ({ x: xE, y: base + 10.2, z, ry: Math.PI / 2, s: 2.2 })),
-      dcNear);
-  }
 
   // Wall collision, with the doorway left open.
   const wallTop = heightAt(DC.x, DC.z) + base + H;
@@ -2645,18 +2571,6 @@ function buildDatacentre() {
     lamp.position.set(lx, APRON_H + 8.2, lz);
     g.add(lamp);
     yardLamps.push({ light: lamp, mat: headMat });
-  }
-
-  // Beacons. Emissive here is right, unlike on the path stones: these ARE
-  // lights, and they should be the only thing of the building visible at night.
-  for (const [bx, bz] of [[-W / 2 + 3, -D / 2 + 3], [W / 2 - 3, -D / 2 + 3],
-                          [-W / 2 + 3, D / 2 - 3], [W / 2 - 3, D / 2 - 3]]) {
-    const lamp = new THREE.Mesh(
-      new THREE.SphereGeometry(0.55, 10, 8),
-      new THREE.MeshLambertMaterial({ color: 0x8a2a20, emissive: new THREE.Color(0xff3b2a) }));
-    lamp.position.set(bx, base + H + 3.2, bz);
-    g.add(lamp);
-    beacons.push(lamp.material);
   }
 
   g.position.set(DC.x, heightAt(DC.x, DC.z), DC.z);
@@ -3693,13 +3607,6 @@ function frame(now) {
       y.light.intensity = lit * 22;
       y.mat.emissiveIntensity = lit;
     }
-  }
-
-  if (beacons.length) {
-    // Off in daylight, and slow — an aviation beacon, not a warning strobe.
-    const pulse = 0.5 + 0.5 * Math.sin(now * 0.0022);
-    const lit = (1 - daylight) * (0.25 + pulse * 0.75);
-    for (const m of beacons) m.emissiveIntensity = lit;
   }
 
   if (fire) {

@@ -30,17 +30,13 @@ OUT = 'assets/kit'
 TEX_PX = 512
 
 # What the elevation is dressed with, and what it is for.
+# Only what the game actually loads. The elevation was dressed with vents, a
+# service run and uplighters for a while and it read as a texture made of plant
+# rather than plant on a wall, so it came back out; the models are still in _tmp
+# if that is revisited.
 MODELS = [
     ('Platforms', 'Door_Metal'),          # the sliding leaves
     ('Platforms', 'Door_Frame_Square'),   # and their frame
-    ('Props', 'Prop_Vent_Big'),           # louvre banks — a hall elevation is mostly louvre
-    ('Props', 'Prop_Vent_Wide'),
-    ('Props', 'Prop_Vent_Small'),
-    ('Props', 'Prop_Fan_Small'),          # extract fans, higher up
-    ('Props', 'Prop_Light_Floor'),        # the uplighters at the foot of the wall
-    ('Props', 'Prop_PipeHolder'),         # service runs along the base
-    ('Props', 'Prop_Clamp'),
-    ('Columns', 'Column_MetalSupport'),   # ribs between the bays
 ]
 
 

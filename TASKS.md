@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-19**.
+**Open**; the next free number is **W-20**.
 
 ## In progress
 
@@ -37,6 +37,14 @@ nostos laptop.
       live inside `world-preview.html` and can only be guarded by reading the
       source. The first two have gone wrong more than once and are worth pulling
       out properly.
+- [ ] **W-19 · Dressing the elevation.** A hundred and sixty-eight metres of
+      clean slab still reads as a warehouse rather than a facility. The first
+      attempt put a vent every six metres on two levels plus a service run and
+      clamps — about 130 pieces, which read as a texture made of plant. Cut to a
+      quarter and greyed, it still looked wrong, so it came out entirely. The
+      models are in `_tmp` and `tools/import-kit.py` remembers how to bring them
+      back. Whatever replaces it wants to be a few large things that clearly do
+      a job, not a scatter of small ones.
 - [ ] **W-10 · A laptop for Walker to find.** At some point he picks one up, and
       the nostos mechanics come across with it: `unix.js` proper (pipes,
       redirect, `ed`/`pico`, man pages), the workspace, and a machine that is
@@ -75,6 +83,14 @@ same as `tools/import-nature.py` does for the nature pack, and only the files
 actually loaded get copied out of `_tmp/`.
 
 ## Done
+
+- [x] **W-08b** 2026-08-26 **The door glitch, properly.** Not z-fighting.
+      `shadowMap.autoUpdate` is off, so the map is baked on demand — and the
+      doors are the only thing outside that moves every frame, so their shadows
+      stayed where the leaves had been and the panels slid out from under them.
+      The leaves cast nothing now: they are 12 cm panels against a wall in its
+      own shade. Moving them proud of the slab was still right, but it was not
+      the bug.
 
 - [x] **W-09** 2026-08-26 **The black apron, and the elevation.** Same cause as
       the wall: `slab.jpg` averages 98 of 255, which is 0.13 linear against the

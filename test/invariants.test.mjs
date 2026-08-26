@@ -146,18 +146,24 @@ test('lights are switched with visible, not with intensity', () => {
     + 'fragment whether it contributes or not');
 });
 
-test('the wall map is lifted off its own black floor', () => {
+test('the wall map is lifted off its own black floor, grain intact', () => {
   // concrete.jpg averages 71 of 255, which is 0.06 once decoded to linear. A
   // surface returning six per cent is charcoal, and no amount of light makes it
-  // read as concrete — every attempt to fix the black elevations by adding fill
-  // was pushing on the wrong end of the equation.
-  const m = grab(GAME, /diffuseColor\.rgb = mix\(vec3\(([\d.]+), ([\d.]+), ([\d.]+)\), diffuseColor\.rgb, ([\d.]+)\)/,
+  // read as concrete. But the first fix blended toward a flat grey, which lifts
+  // the mean and discards the grain in the same stroke — the wall came out as
+  // painted card. Gain and offset raise it and widen the variation instead.
+  const m = grab(GAME, /diffuseColor\.rgb = diffuseColor\.rgb \* ([\d.]+) \+ ([\d.]+);/,
                  'the wall map lift');
-  const [target, keep] = [Number(m[1]), Number(m[4])];
-  const lifted = target * (1 - keep) + 0.06 * keep;
-  assert.ok(lifted > 0.15,
-    `lifted albedo is ${lifted.toFixed(3)} linear; concrete returns 0.2 to 0.4`);
-  assert.ok(keep >= 0.3, 'keep some of the grain or the wall reads as flat paint');
+  const [gain, offset] = [Number(m[1]), Number(m[2])];
+  const mean = 0.06 * gain + offset;
+  assert.ok(mean > 0.15 && mean < 0.45,
+    `lifted mean is ${mean.toFixed(3)} linear; concrete returns 0.2 to 0.4`);
+  assert.ok(gain > 1.2, 'a gain at or under 1 flattens the grain rather than lifting it');
+  assert.ok(0.20 * gain + offset < 1, 'the brightest texels clip');
+  // Scoped to the wall's own constant: the path stones use a mix on purpose,
+  // and for a different reason — there the goal really is less contrast.
+  assert.ok(!/mix\(vec3\(0\.34, 0\.34, 0\.33\)/.test(GAME),
+    'the old blend-toward-grey is back on the wall; it flattens the texture');
 });
 
 // ---- movement ---------------------------------------------------------------
@@ -203,6 +209,16 @@ test('the doorway is derived from the leaf, so the model is never stretched', ()
   const openW = 2 * w * scale;
   assert.ok(openW > 4, `a ${openW.toFixed(2)} m bay is too narrow for a hall this size`);
   assert.match(GAME, /m\.scale\.setScalar\(DOOR_SCALE\)/, 'the leaf must scale uniformly');
+});
+
+test('the sliding leaves cast no shadow', () => {
+  // shadowMap.autoUpdate is off, so anything that moves every frame drags a
+  // stale shadow behind it. The doors are the only continuously moving geometry
+  // outside, and the displaced shadow was the flicker at the doorway.
+  assert.match(GAME, /o\.castShadow = false;/,
+    'the door leaves are casting again; their shadow will lag behind them');
+  assert.match(GAME, /renderer\.shadowMap\.autoUpdate = false/,
+    'if the shadow map updates every frame this guard is moot — and the cost is back');
 });
 
 // ---- the rack faces ---------------------------------------------------------
