@@ -1609,6 +1609,11 @@ const dcInterior = new THREE.Group();
 const dcGhost = new THREE.Group();   // the near walls, as a hint, only indoors
 const exitGlow = [];
 let ledMesh = null, ledCount = 0;
+// Beside ledMesh, not beside the other per-frame state: buildDatacentre() fills
+// these and runs long before that section is reached.
+let ledNext = null;      // earliest time each cabinet may change again
+let ledPeriod = null;    // and how long it waits, which differs per cabinet
+const ledCol = new THREE.Color();
 const stripMats = [];
 
 const DOOR_W = 8, DOOR_H = 5.2;
@@ -1816,11 +1821,51 @@ function buildDatacentre() {
   // this many boxes would cost more than everything else together.
   const rackGeo = new THREE.BoxGeometry(0.62, 2.2, 1.15);
   const rackMat = new THREE.MeshLambertMaterial({ color: 0x14181d, flatShading: true });
-  // A COLUMN, NOT A SCATTER OF DOTS. What reads in a real hall is the full
-  // height of each cabinet lit from inside — a stack of kit behind a mesh door,
-  // seen as one bright vertical bar. Dots read as Christmas lights.
-  const ledGeo = new THREE.PlaneGeometry(0.34, 1.74);
-  const ledMat = new THREE.MeshBasicMaterial({ toneMapped: false });
+  // A CABINET IS A STACK OF MACHINES, and it should look like one. The column
+  // is right at a distance but it was a single unbroken bar; what a rack
+  // actually shows is fourteen or so units divided by dark gaps, each with its
+  // own little run of indicator lights.
+  //
+  // All of that is one texture rather than geometry: the slots and their LEDs
+  // are drawn once to a canvas, and the per-instance colour tints the whole
+  // face — so every cabinet still blinks on its own, and the structure inside
+  // it costs nothing. Fifty thousand individual lamps would be the alternative.
+  const faceTex = (() => {
+    const W2 = 96, H2 = 320, U = 22;              // U: one rack unit, in pixels
+    const cv = document.createElement('canvas');
+    cv.width = W2; cv.height = H2;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#05070b';
+    c.fillRect(0, 0, W2, H2);
+    for (let y = 4; y + U < H2; y += U + 3) {
+      // The lit face of one machine. Kept pale, because the instance colour is
+      // what makes it blue — a blue texture would multiply to almost nothing.
+      const v = 150 + rand() * 70 | 0;
+      c.fillStyle = 'rgb(' + v + ',' + v + ',' + v + ')';
+      c.fillRect(7, y, W2 - 14, U - 4);
+      // A darker inset, so the unit has a front and not just an outline.
+      c.fillStyle = 'rgba(10,14,20,0.55)';
+      c.fillRect(11, y + 3, W2 - 22, U - 10);
+      // Its indicators: a short run of small lamps, a few of them brighter.
+      for (let k = 0; k < 5; k++) {
+        const bright = rand();
+        c.fillStyle = bright > 0.72 ? '#ffffff'
+                    : bright > 0.3 ? 'rgba(235,245,255,0.75)'
+                    : 'rgba(120,140,165,0.45)';
+        c.fillRect(15 + k * 7, y + 5, 4, 4);
+      }
+      // And the drive bays down the right, which is most of what you see.
+      c.fillStyle = 'rgba(215,232,250,0.55)';
+      c.fillRect(W2 - 30, y + 5, 16, U - 13);
+    }
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  })();
+
+  const ledGeo = new THREE.PlaneGeometry(0.42, 1.78);
+  const ledMat = new THREE.MeshBasicMaterial({ map: faceTex, toneMapped: false });
 
   // TWO KINDS OF GAP. The aisles between rows are for reaching the cabinets;
   // the cross corridors between GROUPS are for crossing the hall, and without
@@ -1873,6 +1918,14 @@ function buildDatacentre() {
   racks.instanceMatrix.needsUpdate = true;
   ledMesh.instanceMatrix.needsUpdate = true;
   ledMesh.instanceColor.needsUpdate = true;
+  ledNext = new Float32Array(ledCount);
+  ledPeriod = new Float32Array(ledCount);
+  for (let i = 0; i < ledCount; i++) {
+    const r = rand();
+    ledPeriod[i] = r < 0.16 ? 430 + rand() * 280        // busy
+                 : r < 0.72 ? 900 + rand() * 1400       // ticking over
+                 : 2500 + rand() * 4500;                // all but asleep
+  }
   dcInterior.add(racks, ledMesh);
 
   // ---- overhead, and the light that makes it feel wrong ---------------------
@@ -2901,7 +2954,6 @@ const RESPAWN_AFTER = 3.4;
 // Close enough to be standing in the flames, not merely warming your hands.
 const BURN_R = 0.85, BURN_DPS = 26;
 let burnFlinch = 0;
-const ledCol = new THREE.Color();
 let jumpV = 0, airborne = false;
 const vel = new THREE.Vector3();
 let speed = 0;
@@ -3142,8 +3194,18 @@ function frame(now) {
     // would mean re-uploading the whole instance colour buffer sixty times a
     // second; touching a scattered handful looks exactly the same, because no
     // eye tracks four thousand lights at once, and costs nothing.
-    for (let n = 0; n < 120; n++) {
+    // EVERY CABINET KEEPS ITS OWN TIME. One shared interval made the whole hall
+    // breathe together; some machines are busy and some have been idle for
+    // months, and that difference is most of what makes the room feel alive.
+    //
+    // The fast end is still the safety floor: 420 ms is 2.4 changes a second,
+    // under the three-a-second line (WCAG 2.3.1), and no cabinet is allowed
+    // below it however the random draw falls. The slow end runs to seven
+    // seconds.
+    for (let n = 0; n < 90; n++) {
       const i = (Math.random() * ledCount) | 0;
+      if (now < ledNext[i]) continue;
+      ledNext[i] = now + ledPeriod[i] * (0.75 + Math.random() * 0.5);
       const roll = Math.random();
       // Mostly the steady green of something idling, occasionally amber, and
       // very rarely the red that makes you look twice.
@@ -3226,8 +3288,12 @@ function frame(now) {
 
   if (fire) {
     const t = now * 0.001;
+    // MEASURED AGAINST THE THRESHOLD. Three flashes a second is the line
+    // (WCAG 2.3.1); the top term here was 23.7 rad/s, which is 3.77 Hz and over
+    // it. At 14.6 it is 2.32 Hz, and the fire still reads as unsteady because
+    // unsteadiness is the three rates disagreeing, not the fastest one.
     const f = 0.70 + 0.30 * (Math.sin(t * 11.3) * 0.5 + Math.sin(t * 7.1 + 1.7) * 0.3
-                           + Math.sin(t * 23.7 + 0.4) * 0.2);
+                           + Math.sin(t * 14.6 + 0.4) * 0.2);
     fire.light.intensity = fire.base * f;
     for (const m of fire.mats) m.emissiveIntensity = 0.7 + f * 0.6;
   }

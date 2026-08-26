@@ -60,7 +60,8 @@ for run) and `;` `'` for the size of the held weapon.
 A datacentre stands to the north — 168 x 78 x 17 m, on ground levelled for it,
 with a trail running up to its gate. It has a door, and walking through it puts
 you inside: a pale raised floor with grated panels, blocks of cabinets glowing blue from
-inside, aisles between the rows and corridors between the blocks, dim strips
+inside — each face a stack of machines with its own indicator lamps, blinking on
+its own clock — aisles between the rows and corridors between the blocks, dim strips
 overhead with a couple of them failing, and the sun turned right down so the
 room is lit by its own machines. The near walls leave a ghost behind so you can
 still find the way out.
@@ -258,6 +259,21 @@ _tmp/            every pack in full. Nothing here ships.
 `tools/import-nature.py` is the record of which nature models were taken and at
 what texture size, so the import can be repeated rather than remembered.
 Everything is CC0 from Quaternius; each folder carries its licence.
+
+## Flashing
+
+Every periodic light in the world was measured against WCAG 2.3.1, which allows
+at most three flashes in any one second. Two were over it and both were changed:
+
+| | before | now |
+|---|---|---|
+| campfire, fastest term | 3.77 Hz | 2.32 Hz |
+| server indicators, per cabinet | 4.25 Hz | 2.4 Hz ceiling |
+
+The rest were already well under: camera pilots 0.40 Hz, roof beacons 0.35,
+failing strip lights 0.37, exit glow 0.22, low-health throb 0.51. The cabinets
+now hold a per-cabinet interval between 430 ms and 7 s, and 430 ms is a floor no
+draw can go beneath, so the ceiling holds however the randomness falls.
 
 ## Where this got to
 
