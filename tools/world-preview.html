@@ -1377,7 +1377,8 @@ function lightTheFire(group, x, z) {
 const beacons = [];
 const signs = [];
 const yardLamps = [];
-const cameras = [];
+const signLights = [];
+const pilots = [];
 
 // Concrete and hazard panel, both David M. Berry's own CC0 work out of NostOS.
 // A box has one set of UVs across every face, so the repeat has to be set per
@@ -1666,11 +1667,20 @@ function buildDatacentre() {
     return t;
   };
 
-  const signMat = (text, px, py) => new THREE.MeshLambertMaterial({
-    map: signTex(text, px, py),
-    // Lit signage: enough at night to read, nothing in daylight.
-    emissive: new THREE.Color(0x9fb4c4), emissiveIntensity: 0,
-  });
+  const signMat = (text, px, py) => {
+    const tex = signTex(text, px, py);
+    return new THREE.MeshLambertMaterial({
+      map: tex,
+      // EMISSIVE NEEDS THE MAP. A flat emissive colour is added right across the
+      // material, so at night it swamped the plate and the sign came up as a
+      // pale slab with the letters darker than their background — inside out.
+      // With the same texture as an emissiveMap the glow follows the image, and
+      // only the lettering lights.
+      emissive: new THREE.Color(0xffffff),
+      emissiveMap: tex,
+      emissiveIntensity: 0,
+    });
+  };
 
   const NAME = 'NEOCLOUD DATA SOLUTIONS';
   // SIZED TO BE READ IN ONE VIEW. At the default zoom the orthographic camera
@@ -1695,56 +1705,86 @@ function buildDatacentre() {
 
   signs.push(southMat, eastMat);
 
-  // SECURITY CAMERAS. A body on a bracket, tilted down at the yard, with a
-  // status lamp. The blink is deliberately slow: about one every three seconds,
-  // ramped rather than switched, and each camera on its own phase so they never
-  // pulse together. Photosensitive-seizure guidance puts the danger above three
-  // flashes a second; this is an order of magnitude under that and is meant to
-  // read as a thing idling, not as an alarm.
-  const camera = (x, y, z, yaw) => {
-    const cam = new THREE.Group();
-    const grey = (w2, h2, d2, col) => new THREE.Mesh(
+  // The units sit where they always sat. The four that happen to hang over a
+  // sign are lamps instead of cameras, angled DOWN at the name — the building
+  // stays black and the company's name is the only lit thing for a hundred
+  // metres, which is a worse thing to come across than a camera. The rest are
+  // still cameras, and every unit keeps a red pilot.
+  const unitAt = (x, y, z, yaw, litTarget) => {
+    const u = new THREE.Group();
+    const part = (w2, h2, d2, col) => new THREE.Mesh(
       new THREE.BoxGeometry(w2, h2, d2),
       new THREE.MeshLambertMaterial({ color: col, flatShading: true }));
 
-    const bracket = grey(0.12, 0.12, 0.62, 0x4a4f54);
+    const bracket = part(0.12, 0.12, 0.62, 0x4a4f54);
     bracket.position.set(0, 0, 0.31);
-    cam.add(bracket);
+    u.add(bracket);
 
     const body = new THREE.Group();
     body.position.set(0, -0.16, 0.78);
-    body.rotation.x = -0.34;                       // looking down at the apron
-    const shell = grey(0.30, 0.28, 0.62, 0xd8dcdf);
-    body.add(shell);
-    const hood = grey(0.34, 0.06, 0.40, 0xb2b7bb);
-    hood.position.set(0, 0.17, -0.06);
-    body.add(hood);
-    const lens = grey(0.16, 0.16, 0.06, 0x15181b);
-    lens.position.set(0, 0, -0.32);
-    body.add(lens);
+    body.rotation.x = -0.34;                     // both types look downward
+    u.add(body);
 
     const lampMat = new THREE.MeshLambertMaterial({
       color: 0x50201c, emissive: new THREE.Color(0xff2a1c), emissiveIntensity: 0,
     });
-    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), lampMat);
-    lamp.position.set(0.10, 0.10, -0.31);
-    body.add(lamp);
+    const pilot = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), lampMat);
 
-    cam.add(body);
-    cam.position.set(x, y, z);
-    cam.rotation.y = yaw;
-    cam.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    g.add(cam);
-    // Phase spread so no two are ever in step with each other.
-    cameras.push({ mat: lampMat, phase: cameras.length * 0.37 });
+    if (litTarget) {
+      body.add(part(0.46, 0.22, 0.36, 0xc6cbcf));
+      const glassMat = new THREE.MeshLambertMaterial({
+        color: 0x9aa6ac, emissive: new THREE.Color(0xdfeaf2), emissiveIntensity: 0,
+      });
+      const glass = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.28), glassMat);
+      glass.position.set(0, -0.13, 0);
+      body.add(glass);
+      pilot.position.set(0.20, 0.06, -0.10);
+      body.add(pilot);
+
+      // No shadows from these: four shadow-casting cones would cost more than
+      // the rest of the frame and nothing would be seen to.
+      const spot = new THREE.SpotLight(0xdfeaf2, 0, 24, 0.60, 0.78, 1.4);
+      spot.position.set(x, y - 0.2, z);
+      const aim = new THREE.Object3D();
+      aim.position.copy(litTarget);
+      g.add(aim);
+      spot.target = aim;
+      g.add(spot);
+      signLights.push({ spot, glass: glassMat });
+    } else {
+      body.add(part(0.30, 0.28, 0.62, 0xd8dcdf));
+      const hood = part(0.34, 0.06, 0.40, 0xb2b7bb);
+      hood.position.set(0, 0.17, -0.06);
+      body.add(hood);
+      const lens = part(0.16, 0.16, 0.06, 0x15181b);
+      lens.position.set(0, 0, -0.32);
+      body.add(lens);
+      pilot.position.set(0.10, 0.10, -0.31);
+      body.add(pilot);
+    }
+
+    pilots.push({ mat: lampMat, phase: pilots.length * 0.31 });
+    u.position.set(x, y, z);
+    u.rotation.y = yaw;
+    u.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    g.add(u);
   };
 
   const camY = 1.6 + H * 0.80;
-  for (const cx of [-34, -12, 12, 34]) camera(cx, camY, D / 2 + 0.1, 0);
-  for (const cz of [-14, 10]) camera(W / 2 + 0.1, camY, cz, -Math.PI / 2);
-  for (const cz of [-10, 14]) camera(-W / 2 - 0.1, camY, cz, Math.PI / 2);
+  const signY = 1.6 + H * 0.62;
+  // South: the sign spans +/-17, so the inner pair is over it and the outer is not.
+  for (const cx of [-34, 34]) unitAt(cx, camY, D / 2 + 0.1, 0, null);
+  for (const cx of [-12, 12]) {
+    unitAt(cx, camY, D / 2 + 0.1, 0, new THREE.Vector3(cx, signY, D / 2 + 1.0));
+  }
+  // East: the sign spans +/-15, so both units are over it.
+  for (const cz of [-14, 10]) {
+    unitAt(W / 2 + 0.1, camY, cz, -Math.PI / 2, new THREE.Vector3(W / 2 + 1.0, signY, cz));
+  }
+  // West has no sign.
+  for (const cz of [-10, 14]) unitAt(-W / 2 - 0.1, camY, cz, Math.PI / 2, null);
 
-  // Yard lights. A working site is lit at night, and the apron is the one place
+  // Yard lights.  // Yard lights. A working site is lit at night, and the apron is the one place
   // in this world with a reason to be. Poles with a head each, and a point light
   // that comes up as the daylight goes — no shadows from them, which is what
   // keeps six of them affordable.
@@ -2431,16 +2471,27 @@ function frame(now) {
 
   if (signs.length) {
     // Comes up as the daylight goes, and holds steady — it is a lit sign, not a
-    // beacon, so it does not pulse.
-    const lit = Math.pow(1 - daylight, 1.4) * 0.85;
+    // beacon, so it does not pulse. Kept modest so the floodlights above it
+    // still have visible work to do.
+    const lit = Math.pow(1 - daylight, 1.4) * 0.55;
     for (const m of signs) m.emissiveIntensity = lit;
   }
 
-  if (cameras.length) {
-    // A third of a hertz, ramped up and down rather than switched. Well under
-    // any flash threshold, and it reads as a standby lamp instead of a strobe.
+  if (signLights.length) {
+    const night = Math.pow(1 - daylight, 1.3);
+    for (const f of signLights) {
+      f.spot.intensity = night * 34;
+      f.glass.emissiveIntensity = night;
+    }
+  }
+
+  if (pilots.length) {
+    // A third of a hertz, ramped rather than switched, each on its own phase so
+    // they never pulse together. Photosensitive guidance puts the danger above
+    // three flashes a second; this is an order of magnitude under it, and reads
+    // as something idling rather than as an alarm.
     const t = now * 0.00033;
-    for (const c of cameras) {
+    for (const c of pilots) {
       const cycle = (t + c.phase) % 1;
       const pulse = cycle < 0.16 ? Math.sin((cycle / 0.16) * Math.PI) : 0;
       c.mat.emissiveIntensity = 0.10 + pulse * 0.90;
