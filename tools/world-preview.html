@@ -15,6 +15,25 @@
 <meta charset="utf-8">
 <meta http-equiv="cache-control" content="no-store">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+
+<!-- THE CARD LIVES ON BOTH PAGES. index.html redirects here with a timestamp on
+     the URL to get past Pages' ten-minute cache, and some crawlers follow that
+     redirect before they finish reading the head they landed on. Whichever page
+     they end up parsing has to carry a card. -->
+<meta property="og:site_name" content="Walker">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Walker">
+<meta property="og:description" content="An isometric world for a three-dimensional character. A story by David M. Berry.">
+<meta property="og:url" content="https://dmberry.github.io/walker/">
+<meta property="og:image" content="https://dmberry.github.io/walker/assets/brand/share-card.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="WALKER, in letter-spaced capitals on a dark field, marked BETA">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Walker">
+<meta name="twitter:description" content="An isometric world for a three-dimensional character. A story by David M. Berry.">
+<meta name="twitter:image" content="https://dmberry.github.io/walker/assets/brand/share-card.jpg">
 <title>Walker — world preview</title>
 <style>
   /* NOTHING HERE IS TEXT TO SELECT. A drag that starts on a panel selects its

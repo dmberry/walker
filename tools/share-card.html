@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Walker — share card</title>
+<style>
+  html, body { margin: 0; background: #14181c; color: #cfd8c3;
+               font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  main { padding: 20px; }
+  canvas { display: block; max-width: 100%; border: 1px solid #2a3238; }
+  p { max-width: 62em; color: #8d998a; }
+  code { color: #cfd8c3; }
+</style>
+</head>
+<body>
+<main>
+<canvas id="cv" width="1200" height="630"></canvas>
+<p>1200 × 630, opaque, JPEG. Both dimensions matter: 600 × 315 is the documented
+minimum for a large card but Messages and WhatsApp fall back to a small
+thumbnail below 1200 × 630, and an <b>alpha channel</b> makes both of them drop
+the preview outright. So: no transparency anywhere, and a JPEG rather than a
+PNG.</p>
+<p>To rewrite the file, open this page and run
+<code>document.getElementById('cv').toDataURL('image/jpeg', 0.86)</code>,
+then decode the base64 into <code>assets/brand/share-card.jpg</code>.</p>
+</main>
+<script>
+const c = document.getElementById('cv').getContext('2d');
+const W = 1200, H = 630;
+
+// Opaque ground. Nothing on this card may carry alpha.
+c.fillStyle = '#0b1118'; c.fillRect(0, 0, W, H);
+
+// A ground strip along the foot, flat colour. It sits BELOW the type rather
+// than through it: cutting the field at 62% put the seam directly under the
+// word and left the bottom third reading as an empty panel.
+//
+// Flat, because a gradient dithers, and dither is the one thing a small JPEG of
+// flat colour cannot compress.
+const GROUND = Math.round(H * 0.80);
+c.fillStyle = '#0e1720'; c.fillRect(0, GROUND, W, H - GROUND);
+c.fillStyle = '#1a2836'; c.fillRect(0, GROUND, W, 2);
+
+c.textBaseline = 'alphabetic';
+
+// ---- the lockup: WALKER with a tiny BETA at its shoulder --------------------
+// Measured rather than positioned by hand, so the pair stays centred if the
+// wordmark ever changes. Chrome's measureText INCLUDES the trailing letter
+// space after the last glyph, which would push the whole lockup left by a
+// character space, so it comes off again.
+const BASE = 306, SP = 30, GAP = 26;
+
+c.textAlign = 'left';
+c.font = `700 122px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+if ('letterSpacing' in c) c.letterSpacing = SP + 'px';
+const wordW = c.measureText('WALKER').width - ('letterSpacing' in c ? SP : 0);
+
+c.font = '600 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+if ('letterSpacing' in c) c.letterSpacing = '5px';
+const betaW = c.measureText('BETA').width - ('letterSpacing' in c ? 5 : 0);
+
+const x0 = (W - (wordW + GAP + betaW)) / 2;
+
+c.fillStyle = '#f2f6ee';
+c.font = '700 122px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+if ('letterSpacing' in c) c.letterSpacing = SP + 'px';
+c.fillText('WALKER', x0, BASE);
+
+// At the shoulder, not on the baseline: a status mark sits where a trademark
+// would. Cap height on this face is about 0.72 em.
+c.fillStyle = '#7f9469';
+c.font = '600 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+if ('letterSpacing' in c) c.letterSpacing = '5px';
+c.fillText('BETA', x0 + wordW + GAP, BASE - Math.round(122 * 0.72) + 15);
+if ('letterSpacing' in c) c.letterSpacing = '0px';
+
+// ---- rule and byline, centred under the whole lockup ------------------------
+c.textAlign = 'center';
+
+c.fillStyle = '#3b4a3a';
+c.fillRect(W / 2 - 130, 354, 260, 2);
+
+c.fillStyle = '#7d8a72';
+c.font = '400 22px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+c.fillText('A story by David M. Berry', W / 2, 404);
+</script>
+</body>
+</html>
