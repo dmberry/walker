@@ -476,13 +476,18 @@ function applyLight() {
   moon.intensity = 0.42 * night;
   moon.color.setHex(0x9fb6d8);
 
-  hemi.intensity = 0.20 + day * 1.30;
+  // INDOORS THE SKY DIMS, IT DOES NOT SWITCH OFF. With the sun off, the sky
+  // off and the roof stripped away, nothing beyond the door had any light on
+  // it: you stood at the threshold and the whole landscape was a black wall.
+  // A floor value keeps the yard, the fence and the hills readable without
+  // pouring daylight into a hall that has never seen any.
+  hemi.intensity = indoors ? 0.85 : 0.20 + day * 1.30;
   hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, day);
   hemi.groundColor.setHex(0x2a3024).lerp(new THREE.Color(0x6b7360), day);
   rim.intensity = 0.12 + day * 0.46;
 
   tmpCol.copy(SKY_NIGHT).lerp(SKY_DAY, day).lerp(SKY_LOW, low * 0.75);
-  if (indoors) tmpCol.setHex(0x060a12);
+  if (indoors) tmpCol.setHex(0x121c27);
   scene.background.copy(tmpCol);
   scene.fog.color.copy(tmpCol);
 
@@ -494,7 +499,7 @@ function applyLight() {
   // which is one hitch at a door against a permanent tax on every pixel.
   for (const l of interiorLights) {
     l.visible = indoors;
-    if (l.isHemisphereLight) l.intensity = 0.55;
+    if (l.isHemisphereLight) l.intensity = 1.75;
   }
   // The sun does not reach in here. With the roof off it would otherwise pour
   // daylight into a room that has never seen any, and the lamps — which are the
@@ -503,7 +508,7 @@ function applyLight() {
   key.visible = !indoors;
   rim.visible = !indoors;
   moon.visible = !indoors && night > 0.02;
-  hemi.visible = !indoors;
+  hemi.visible = true;
 
   // Outside lights are only lights after dark.
   for (const y of yardLamps) y.light.visible = !indoors && night > 0.02;
@@ -1646,7 +1651,10 @@ let ledMesh = null, ledCount = 0;
 // these and runs long before that section is reached.
 let ledNext = null;      // earliest time each cabinet may change again
 let ledPeriod = null;    // and how long it waits, which differs per cabinet
-const ledCol = new THREE.Color();
+const FRAMES = 6;        // how many lamp patterns each cabinet can show
+const LAYOUTS = 6;       // and how many different cabinets there are to be
+let ledFrame = null;     // which of them it is showing
+let ledAttr = null;      // the GPU-side view of ledFrame
 const flickerLights = [];
 
 const DOOR_W = 8, DOOR_H = 5.2;
@@ -1896,7 +1904,7 @@ function buildDatacentre() {
   // falls on it. MeshBasicMaterial takes them out of the lighting calculation
   // altogether; the room still reads because the floor is lit and the faces
   // glow on their own.
-  const rackMat = new THREE.MeshBasicMaterial({ color: 0x0e1216 });
+  const rackMat = new THREE.MeshBasicMaterial({ color: 0x1d2530 });
   // A CABINET IS A STACK OF MACHINES, and it should look like one. The column
   // is right at a distance but it was a single unbroken bar; what a rack
   // actually shows is fourteen or so units divided by dark gaps, each with its
@@ -1906,61 +1914,94 @@ function buildDatacentre() {
   // are drawn once to a canvas, and the per-instance colour tints the whole
   // face — so every cabinet still blinks on its own, and the structure inside
   // it costs nothing. Fifty thousand individual lamps would be the alternative.
+  // AN ATLAS OF CABINETS, SIX WAYS EACH. Two things were wrong with one baked
+  // face. Every cabinet in the hall was the same cabinet, lamp for lamp, which
+  // reads as wallpaper the moment you see two rows at once. And a blink was the
+  // whole panel tinting light or dark, which is not what a rack does.
+  //
+  // So: LAYOUTS different cabinets down the texture, FRAMES lamp states across
+  // it. A per-instance attribute names the cell. The layout half never changes,
+  // so a cabinet stays the cabinet it is; the frame half is stepped on a timer,
+  // so what moves on screen is a handful of five-pixel lamps.
   const faceTex = (() => {
     // U doubled: seven machines to a cabinet rather than fourteen, so each one
     // reads as a machine and not as a stripe.
     const W2 = 96, H2 = 320, U = 44;              // U: one rack unit, in pixels
     const cv = document.createElement('canvas');
-    cv.width = W2; cv.height = H2;
+    cv.width = W2 * FRAMES; cv.height = H2 * LAYOUTS;
     const c = cv.getContext('2d');
-    // MOSTLY BLACK. The first version lit the whole face and the hall read as
-    // stacked light boxes; a rack front is dark steel and what you actually see
-    // of it across a room is the lamps. The colours are baked in here rather
-    // than tinted per instance, because a cabinet has blue and amber and red on
-    // it at once and one instance colour can only ever be one hue.
-    c.fillStyle = '#04060a';
-    c.fillRect(0, 0, W2, H2);
+    // WEIGHTED HARD TOWARDS BLUE. Link and activity lamps are blue or cyan on
+    // almost everything in a rack; amber means attention and red means a fault,
+    // and a hall where a twentieth of the lamps are red is a hall on fire.
     const LAMP = [
-      ['rgba(120,190,255,', 0.46],   // blue, the common one
-      ['rgba(140,230,255,', 0.20],   // cyan
-      ['rgba(240,248,255,', 0.16],   // white
-      ['rgba(255,168,60,',  0.12],   // amber
-      ['rgba(255,74,52,',   0.06],   // red
+      ['rgba(120,190,255,', 0.58],   // blue, the common one
+      ['rgba(140,230,255,', 0.21],   // cyan
+      ['rgba(240,248,255,', 0.12],   // white
+      ['rgba(255,168,60,',  0.065],  // amber
+      ['rgba(255,74,52,',   0.025],  // red
     ];
     const pick = () => {
       let r = rand();
       for (const [c2, w] of LAMP) { if ((r -= w) <= 0) return c2; }
       return LAMP[0][0];
     };
-    for (let y = 4; y + U < H2; y += U + 3) {
-      // The machine's own face: near black, with just enough edge to separate
-      // it from the one above.
-      const v = 12 + rand() * 10 | 0;
-      c.fillStyle = 'rgb(' + v + ',' + (v + 2) + ',' + (v + 5) + ')';
-      c.fillRect(6, y, W2 - 12, U - 4);
-      c.fillStyle = 'rgba(90,110,135,0.18)';
-      c.fillRect(6, y, W2 - 12, 1);
 
-      // LESS IS MORE. Every socket filled reads as a Christmas tree; most of a
-      // real rack front is dark metal and the lamps are the exception. Roughly
-      // a third of the machines show nothing at all.
-      if (rand() < 0.32) continue;
-      // Indicators: a short run on the left, small and bright.
-      for (let k = 0; k < 3; k++) {
-        if (rand() < 0.45) continue;              // not every socket is filled
-        c.fillStyle = pick() + (0.55 + rand() * 0.45).toFixed(2) + ')';
-        c.fillRect(13 + k * 8, y + 10, 5, 7);
+    // MOSTLY BLACK behind everything. A rack front is dark steel and what you
+    // actually see of it across a room is the lamps.
+    c.fillStyle = '#0a0e14';
+    c.fillRect(0, 0, cv.width, cv.height);
+
+    for (let L = 0; L < LAYOUTS; L++) {
+      const oy = L * H2;
+      // ---- this cabinet's layout, worked out once so all six of its frames
+      // ---- draw the same machines in the same places
+      const units = [];
+      // Not every cabinet is filled to the top: some have empty U at the
+      // bottom, which is what a half-populated rack looks like.
+      const top = 4 + (rand() < 0.35 ? (1 + rand() * 2 | 0) * (U + 3) : 0);
+      for (let y = top; y + U < H2; y += U + 3) {
+        const u = { y, v: 30 + rand() * 16 | 0, lamps: [] };
+        units.push(u);
+        // LESS IS MORE. Every socket filled reads as a Christmas tree; most of a
+        // real rack front is dark metal and the lamps are the exception.
+        if (rand() < 0.32) continue;
+        const add = (x, y2, w, h, aMin, aSpan) => {
+          // MOST LAMPS DO NOT BLINK. A steady lamp is lit in every frame, which
+          // is what a power or link indicator does. A blinker gets its own
+          // six-bit pattern, so no two cabinets run the same sequence.
+          const blinks = rand() < 0.38;
+          let pat = (1 << FRAMES) - 1;
+          if (blinks) { pat = 0; for (let f = 0; f < FRAMES; f++) if (rand() < 0.55) pat |= 1 << f; }
+          u.lamps.push({ x, y: y2, w, h, col: pick(), a: aMin + rand() * aSpan, pat });
+        };
+        // Indicators: a short run on the left, small and bright.
+        for (let k = 0; k < 3; k++) {
+          if (rand() < 0.45) continue;            // not every socket is filled
+          add(13 + k * 8, y + 10, 5, 7, 0.55, 0.45);
+        }
+        // Drive bays down the right: a column of small lamps, mostly blue.
+        for (let k = 0; k < 3; k++) {
+          if (rand() < 0.55) continue;
+          add(W2 - 38 + k * 6, y + 12, 4, 5, 0.40, 0.50);
+        }
+        // And now and then a unit that is properly awake.
+        if (rand() < 0.06) add(13, y + 26, W2 - 28, 3, 0.85, 0);
       }
-      // Drive bays down the right: a column of small lamps, mostly blue.
-      for (let k = 0; k < 3; k++) {
-        if (rand() < 0.55) continue;
-        c.fillStyle = pick() + (0.40 + rand() * 0.50).toFixed(2) + ')';
-        c.fillRect(W2 - 38 + k * 6, y + 12, 4, 5);
-      }
-      // And now and then a unit that is properly awake.
-      if (rand() < 0.06) {
-        c.fillStyle = pick() + '0.85)';
-        c.fillRect(13, y + 26, W2 - 28, 3);
+
+      // ---- the same cabinet six times, lit six ways -------------------------
+      for (let f = 0; f < FRAMES; f++) {
+        const ox = f * W2;
+        for (const u of units) {
+          c.fillStyle = 'rgb(' + u.v + ',' + (u.v + 2) + ',' + (u.v + 5) + ')';
+          c.fillRect(ox + 6, oy + u.y, W2 - 12, U - 4);
+          c.fillStyle = 'rgba(120,148,180,0.34)';
+          c.fillRect(ox + 6, oy + u.y, W2 - 12, 1);
+          for (const l of u.lamps) {
+            if (!(l.pat & (1 << f))) continue;
+            c.fillStyle = l.col + l.a.toFixed(2) + ')';
+            c.fillRect(ox + l.x, oy + l.y, l.w, l.h);
+          }
+        }
       }
     }
     const t = new THREE.CanvasTexture(cv);
@@ -1969,8 +2010,21 @@ function buildDatacentre() {
     return t;
   })();
 
-  const ledGeo = new THREE.PlaneGeometry(1.05, 2.10);
+  const ledGeo = new THREE.PlaneGeometry(1.34, 2.26);
   const ledMat = new THREE.MeshBasicMaterial({ map: faceTex, toneMapped: false });
+  // Which of the six frames this cabinet is showing. An attribute rather than a
+  // uniform because every cabinet is a different instance of one mesh, and a
+  // one-float buffer is the cheapest thing there is to re-upload.
+  ledMat.onBeforeCompile = (sh) => {
+    sh.vertexShader = 'attribute vec2 aCell;\nvarying vec2 vCell;\n' +
+      sh.vertexShader.replace('#include <uv_vertex>',
+                              '#include <uv_vertex>\n\tvCell = aCell;');
+    sh.fragmentShader = 'varying vec2 vCell;\n' +
+      sh.fragmentShader.replace('#include <map_fragment>',
+        '\tdiffuseColor *= texture2D( map, vec2( ( vMapUv.x + vCell.x ) / ' +
+        FRAMES.toFixed(1) + ', ( vMapUv.y + vCell.y ) / ' +
+        LAYOUTS.toFixed(1) + ' ) );');
+  };
 
   // TWO KINDS OF GAP. The aisles between rows are for reaching the cabinets;
   // the cross corridors between GROUPS are for crossing the hall, and without
@@ -1988,6 +2042,11 @@ function buildDatacentre() {
     }
   }
   ledCount = spots.length;
+
+  // Two numbers per cabinet: which frame it is showing, and which cabinet it is.
+  ledFrame = new Float32Array(ledCount * 2);
+  ledAttr = new THREE.InstancedBufferAttribute(ledFrame, 2);
+  ledGeo.setAttribute('aCell', ledAttr);
 
   const racks = new THREE.InstancedMesh(rackGeo, rackMat, ledCount);
   ledMesh = new THREE.InstancedMesh(ledGeo, ledMat, ledCount);
@@ -2007,10 +2066,14 @@ function buildDatacentre() {
     m4.rotation.set(0, 0, 0);
     m4.updateMatrix();
     ledMesh.setMatrixAt(i, m4.matrix);
-    // Brightness, near enough white: the hue is in the texture now, and tinting
-    // would drag every lamp on the cabinet to the same colour.
-    col.setHSL(0.58, 0.06, 0.62 + rand() * 0.34);
+    // A FIXED TINT, SET ONCE. This used to be animated, which meant a blink was
+    // the whole cabinet face going light or dark, and a rack does not do that.
+    // The blinking is in the frame attribute now; this is only the slight
+    // difference between one cabinet and the next, and it never moves again.
+    col.setHSL(0.58, 0.06, 0.80 + rand() * 0.20);
     ledMesh.setColorAt(i, col);
+    ledFrame[i * 2]     = (rand() * FRAMES) | 0;
+    ledFrame[i * 2 + 1] = (rand() * LAYOUTS) | 0;
   }
   // ONE BLOCKER PER ROW, not one per cabinet. blocked() is a linear scan, so
   // four thousand of them would be four thousand tests three times a frame; a
@@ -2025,13 +2088,14 @@ function buildDatacentre() {
   racks.instanceMatrix.needsUpdate = true;
   ledMesh.instanceMatrix.needsUpdate = true;
   ledMesh.instanceColor.needsUpdate = true;
+  ledAttr.needsUpdate = true;
   ledNext = new Float32Array(ledCount);
   ledPeriod = new Float32Array(ledCount);
   for (let i = 0; i < ledCount; i++) {
     const r = rand();
-    ledPeriod[i] = r < 0.16 ? 430 + rand() * 280        // busy
-                 : r < 0.72 ? 900 + rand() * 1400       // ticking over
-                 : 2500 + rand() * 4500;                // all but asleep
+    ledPeriod[i] = r < 0.16 ? 620 + rand() * 300       // busy
+                 : r < 0.72 ? 1100 + rand() * 1600      // ticking over
+                 : 2800 + rand() * 5000;                // all but asleep
   }
   dcInterior.add(racks, ledMesh);
 
@@ -2052,9 +2116,9 @@ function buildDatacentre() {
     interiorLights.push(l);
     // A couple of them are failing. Slow — a third of a hertz — so it reads as
     // a tube on its way out and never as a strobe.
-    flickerLights.push({ light: l, phase: rand() * 6.28, bad: rand() < 0.34, base: 64 });
+    flickerLights.push({ light: l, phase: rand() * 6.28, bad: rand() < 0.34, base: 128 });
   }
-  const amb = new THREE.HemisphereLight(0x2a4560, 0x0a1119, 0);
+  const amb = new THREE.HemisphereLight(0x4a6d92, 0x18242f, 0);
   dcInterior.add(amb);
   interiorLights.push(amb);
 
@@ -3323,24 +3387,21 @@ function frame(now) {
     // breathe together; some machines are busy and some have been idle for
     // months, and that difference is most of what makes the room feel alive.
     //
-    // The fast end is still the safety floor: 420 ms is 2.4 changes a second,
+    // The fast end is the safety floor: 620 ms is 1.6 changes a second, well
     // under the three-a-second line (WCAG 2.3.1), and no cabinet is allowed
-    // below it however the random draw falls. The slow end runs to seven
-    // seconds.
+    // below it however the random draw falls. The slow end runs to eight
+    // seconds. What changes is a handful of five-pixel lamps, scattered across
+    // the hall, so neither the rate nor the flashing area comes near the
+    // threshold.
     for (let n = 0; n < 90; n++) {
       const i = (Math.random() * ledCount) | 0;
       if (now < ledNext[i]) continue;
       ledNext[i] = now + ledPeriod[i] * (0.75 + Math.random() * 0.5);
-      const roll = Math.random();
-      // Mostly the steady green of something idling, occasionally amber, and
-      // very rarely the red that makes you look twice.
-      // A cabinet brightens and dims; it does not change colour. Occasionally
-      // one drops right down, which is a machine going quiet.
-      if (roll < 0.14) ledCol.setHSL(0.58, 0.06, 0.22 + Math.random() * 0.18);
-      else ledCol.setHSL(0.58, 0.06, 0.58 + Math.random() * 0.42);
-      ledMesh.setColorAt(i, ledCol);
+      // Move to a DIFFERENT pattern, never a freshly random one: landing on the
+      // frame you are already showing is a blink that does not blink.
+      ledFrame[i * 2] = (ledFrame[i * 2] + 1 + (Math.random() * (FRAMES - 1) | 0)) % FRAMES;
     }
-    ledMesh.instanceColor.needsUpdate = true;
+    ledAttr.needsUpdate = true;
 
     // The exit breathes, slowly. A steady rectangle reads as scenery.
     for (let i = 0; i < exitGlow.length; i++) {
