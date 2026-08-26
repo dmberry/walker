@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-20**.
+**Open**; the next free number is **W-22**.
 
 ## In progress
 
@@ -37,14 +37,6 @@ nostos laptop.
       live inside `world-preview.html` and can only be guarded by reading the
       source. The first two have gone wrong more than once and are worth pulling
       out properly.
-- [ ] **W-19 · Dressing the elevation.** A hundred and sixty-eight metres of
-      clean slab still reads as a warehouse rather than a facility. The first
-      attempt put a vent every six metres on two levels plus a service run and
-      clamps — about 130 pieces, which read as a texture made of plant. Cut to a
-      quarter and greyed, it still looked wrong, so it came out entirely. The
-      models are in `_tmp` and `tools/import-kit.py` remembers how to bring them
-      back. Whatever replaces it wants to be a few large things that clearly do
-      a job, not a scatter of small ones.
 - [ ] **W-10 · A laptop for Walker to find.** At some point he picks one up, and
       the nostos mechanics come across with it: `unix.js` proper (pipes,
       redirect, `ed`/`pico`, man pages), the workspace, and a machine that is
@@ -83,6 +75,23 @@ same as `tools/import-nature.py` does for the nature pack, and only the files
 actually loaded get copied out of `_tmp/`.
 
 ## Done
+
+- [x] **W-19** 2026-08-26 **Dressing the elevation, second attempt.** The first
+      scattered 130 small kit props and read as a texture made of plant. The
+      lesson was scale, not quantity: three large pieces of the building itself,
+      each obviously doing a job. Two stair cores standing proud and running the
+      full height, breaking the 168 m run into thirds; a 46 m louvre bank
+      between them with fifteen real tipped slats in a recessed reveal, in one
+      instanced call; and a loading bay with shutter, canopy and dock. All boxes,
+      so the lot costs a handful of draw calls.
+
+- [x] **W-21** 2026-08-26 **Terrain edge.** The detailed plane stopped dead at
+      150 m while fog reaches 215, so at the boundary you saw sky under the
+      horizon and the plane's own lit rim. A coarse skirt now extends to 600 m —
+      1200 m at 120 segments, 10 m to a quad against the inner plane's 0.94 —
+      reading the same `heightAt`, so the hills carry on across the join. It
+      sits 0.4 m low and the detailed plane wins on depth; the 40 cm lip at the
+      boundary is 150 m away under heavy fog.
 
 - [x] **W-20** 2026-08-26 **The texture bug under all the others.** `siteTex`
       hands back a texture built on an 8x8 placeholder so callers get something

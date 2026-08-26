@@ -1237,6 +1237,61 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
+// ---- the country beyond the plane -------------------------------------------
+// The detailed ground stops dead at 150 m while fog reaches 215, so standing at
+// the boundary you look a good sixty metres past where the world ends: sky under
+// the horizon, and the plane's own lit rim.
+//
+// heightAt() is noise and answers for any coordinate, so this is only a question
+// of what to spend. The first attempt was one big coarse sheet laid under
+// everything and dropped 0.4 m, on the assumption that the detailed plane would
+// always win on depth. It does not. A mesh with 10 m quads interpolates straight
+// across a dip that the real surface curves down into, so the coarse sheet rode
+// ABOVE the detailed one wherever the ground fell away between its samples, and
+// punched through as dark patches in the grass.
+//
+// So it is a ring, not a sheet: four strips that start inside the plane's edge
+// by a few metres and run out to 600. Nothing overlaps except that narrow lap,
+// which sits under the detailed mesh and is 1.5 m lower — a lip that far out,
+// under heavy fog, is not something you can pick out. No shadows either way; it
+// is a backdrop.
+{
+  const IN = WORLD / 2 - 4;         // lap a little inside the detailed plane
+  const OUT = 600;
+  const QUAD = 10;                  // against the inner plane's 0.94 m
+
+  // The world canvas only covers the inner plane, so the skirt cannot use it.
+  // Tiled grass and a colour taken from the canvas's own middling green, which
+  // is most of what survives the fog anyway.
+  const t = detailTex.clone();
+  t.needsUpdate = true;
+  t.repeat.set(OUT / 5, OUT / 5);
+  const skirtMat = new THREE.MeshLambertMaterial({ color: 0x6f7d54, map: t });
+
+  const strip = (x0, x1, z0, z1) => {
+    const w = x1 - x0, d = z1 - z0;
+    const geo = new THREE.PlaneGeometry(w, d,
+      Math.max(1, Math.round(w / QUAD)), Math.max(1, Math.round(d / QUAD)));
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    const a2 = geo.attributes.position;
+    for (let i = 0; i < a2.count; i++) {
+      a2.setZ(i, heightAt(cx + a2.getX(i), cz - a2.getY(i)));
+    }
+    a2.needsUpdate = true;
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, skirtMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(cx, -1.5, cz);
+    m.castShadow = m.receiveShadow = false;
+    scene.add(m);
+  };
+
+  strip(-OUT, OUT, -OUT, -IN);      // north
+  strip(-OUT, OUT, IN, OUT);        // south
+  strip(-OUT, -IN, -IN, IN);        // west
+  strip(IN, OUT, -IN, IN);          // east
+}
+
 // The 2:1 lattice, turned 45 degrees so it reads as the isometric grid the old
 // world was drawn on. Off by default; G brings it back when you want to know
 // whether a tile-based world would still fit under this.
@@ -1946,6 +2001,75 @@ function buildDatacentre() {
     }
     renderer.shadowMap.needsUpdate = true;
   });
+
+  // ---- what breaks up a hundred and sixty-eight metres --------------------
+  // The first attempt at this scattered a hundred and thirty small kit props
+  // across the wall — a vent every six metres, a service run, clamps between —
+  // and it read as a texture made of plant rather than plant on a building. The
+  // lesson was scale, not quantity: what a hall this size actually has on it is
+  // a few large pieces of the building itself, each obviously doing a job.
+  //
+  // Three, and they are all boxes, so the whole lot costs a handful of calls
+  // plus one instanced mesh for the slats.
+  {
+    const zS = D / 2;
+    const T2 = T / 2;
+    const stack = (w, h, d, col, tile, x, y, z, parent) =>
+      put(box(w, h, d, col, tile), x, y, z, false, parent);
+
+    // 1. TWO STAIR CORES, standing proud of the wall and running its full
+    // height. They break the run into thirds, which is what stops the eye
+    // reading the elevation as one endless slab. A hall this long has escape
+    // stairs whether you draw them or not.
+    for (const sgn of [-1, 1]) {
+      const cx = sgn * W * 0.27;
+      stack(9.5, H + 1.2, 5.5, 0xdcdcd6, 4, cx, base + (H + 1.2) / 2, zS + T2 + 2.7, dcNear);
+      // A capping band, so the core has a top rather than just stopping.
+      stack(10.3, 0.7, 6.3, 0x8d9298, 0, cx, base + H + 1.45, zS + T2 + 2.7, dcNear);
+      // The slot of glazing that says stair rather than lift shaft.
+      stack(1.5, H - 3.4, 0.3, 0x1b2530, 0, cx, base + (H - 1.0) / 2, zS + T2 + 5.5, dcNear);
+    }
+
+    // 2. A LOUVRE BANK between them, which is what the air actually comes
+    // through. A recessed reveal with real slats in it: at this camera a
+    // painted-on grille reads as a sticker, and slats catch the light.
+    const LB_W = 46, LB_H = 6.4, LB_Y = base + 7.6;
+    stack(LB_W, LB_H, 1.1, 0x4a5158, 0, 0, LB_Y, zS + T2 + 0.25, dcNear);   // the reveal
+    {
+      // ONE DRAW CALL FOR THE LOT. Sixty slats as separate meshes would be
+      // sixty objects for something you mostly read as a stripe.
+      const rows = 15;
+      const slatGeo = new THREE.BoxGeometry(LB_W - 1.0, 0.26, 0.7);
+      const slatMat = new THREE.MeshLambertMaterial({ color: 0xb9c0c6, flatShading: true });
+      const slats = new THREE.InstancedMesh(slatGeo, slatMat, rows);
+      slats.castShadow = false;
+      slats.receiveShadow = true;
+      const m4 = new THREE.Object3D();
+      for (let i = 0; i < rows; i++) {
+        m4.position.set(0, LB_Y - LB_H / 2 + 0.55 + i * ((LB_H - 1.1) / (rows - 1)),
+                        zS + T2 + 0.62);
+        m4.rotation.set(-0.42, 0, 0);          // tipped down, as a weather louvre is
+        m4.updateMatrix();
+        slats.setMatrixAt(i, m4.matrix);
+      }
+      slats.instanceMatrix.needsUpdate = true;
+      dcNear.add(slats);
+    }
+
+    // 3. THE LOADING BAY, off to one side of the door, with a canopy over it.
+    // Everything that is in this building arrived through something like this.
+    {
+      const bx = -W * 0.115;
+      stack(15.0, 5.6, 0.9, 0x3f464d, 0, bx, base + 2.8, zS + T2 + 0.2, dcNear);  // the opening
+      stack(13.4, 4.6, 0.35, 0x6d757c, 0, bx, base + 2.5, zS + T2 + 0.7, dcNear); // shutter
+      stack(16.4, 0.55, 4.6, 0xc9ccc7, 0, bx, base + 6.2, zS + T2 + 2.3, dcNear); // canopy
+      for (const dx of [-6.6, 6.6]) {
+        stack(0.4, 6.0, 0.4, 0x8d9298, 0, bx + dx, base + 3.0, zS + T2 + 4.4, dcNear);
+      }
+      // The dock itself: a raised slab you would back a lorry up to.
+      stack(15.6, 1.1, 4.2, 0xb6b6ae, 3, bx, base + 0.55, zS + T2 + 2.6, dcNear);
+    }
+  }
 
   // Wall collision, with the doorway left open.
   const wallTop = heightAt(DC.x, DC.z) + base + H;
