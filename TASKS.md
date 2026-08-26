@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-27**.
+**Open**; the next free number is **W-28**.
 
 ## In progress
 
@@ -97,8 +97,7 @@ actually loaded get copied out of `_tmp/`.
       everything site-specific — host, user, greeting, disk — lives in
       `src/os-ncds.js`, and `newShell` refuses to start without a flavour. A
       second datacentre running a different OS is a second flavour file.
-- [x] **W-26 → renumbered, see Open. W-25b** 2026-08-26 **The datacentre is a
-      spec.** `DC_SPEC` gathers footprint, height, wall colour, sign text, rack
+- [x] **W-27** 2026-08-26 **The datacentre is a spec.** `DC_SPEC` gathers footprint, height, wall colour, sign text, rack
       grouping, mezzanine flag and terminal OS; `buildDatacentre(spec)` reads
       only the spec. The world still holds one instance — extracting the
       builder to a module for true multiples is part of W-18.
