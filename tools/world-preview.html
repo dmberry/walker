@@ -196,7 +196,7 @@
 <canvas id="c"></canvas>
 <div id="about"><div class="card">
   <h1>WALKER</h1>
-  <div class="ver">BETA &middot; VERSION 0.1</div>
+  <div class="ver">BETA &middot; VERSION <span data-version></span></div>
 
   <p>An isometric world for a three-dimensional character. The figure is posed
   and animated each frame rather than picked from baked sprites, and the world
@@ -228,7 +228,7 @@
 
   <div class="dismiss">I or ESC to close</div>
 </div></div>
-<div id="brand"><span class="name">WALKER</span><span class="sub">BETA · v0.1<b id="infoBtn" title="About Walker">i</b></span></div>
+<div id="brand"><span class="name">WALKER</span><span class="sub">BETA · v<span data-version></span><b id="infoBtn" title="About Walker">i</b></span></div>
 <div id="hud">loading…</div>
 <div id="vitals">
   <div class="row"><span class="tag">HP</span><span class="bar"><i id="hpFill"></i></span><span class="num" id="hpNum">100</span></div>
@@ -269,6 +269,12 @@ M mute wind   8 9 wind level   I about
 
 import * as THREE from '../vendor/three.module.min.js';
 import { GLTFLoader } from '../vendor/GLTFLoader.js';
+
+// THE VERSION LIVES HERE AND NOWHERE ELSE. It was written into the title and
+// into the about box separately, which is two places to remember and one to
+// forget. Every span marked data-version is filled from this.
+const VERSION = '0.101';
+for (const el of document.querySelectorAll('[data-version]')) el.textContent = VERSION;
 
 const fail = (m) => { const e = document.getElementById('err'); e.hidden = false; e.textContent += m + '\n'; };
 window.addEventListener('error', ev => fail(ev.message));
