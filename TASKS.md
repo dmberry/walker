@@ -6,7 +6,7 @@ Running list, kept in this file so nothing gets lost between sessions.
 tasks arrive, never reused, and never renumbered when something moves to Done —
 so `W-07` means the same thing in six months as it does today. Sub-tasks take a
 decimal (`W-06.3`). New work takes the next free number at the bottom of
-**Open**; the next free number is **W-24**.
+**Open**; the next free number is **W-27**.
 
 ## In progress
 
@@ -14,6 +14,9 @@ decimal (`W-06.3`). New work takes the next free number at the bottom of
 
 ## Open
 
+- [ ] **W-26 · Loot and search on the mezzanine.** The offices are set
+      dressing: desks, dead screens, cabinets. Searching them — and what they
+      hold — is the game layer to come.
 - [ ] **W-23 · Four terminals round the hall.** Each datacentre gets at least
       four of the perched screens, spread round the hall. For now they can all
       open the same shell; the placement should go in as a list of mount points
@@ -77,6 +80,28 @@ same as `tools/import-nature.py` does for the nature pack, and only the files
 actually loaded get copied out of `_tmp/`.
 
 ## Done
+
+- [x] **W-24** 2026-08-26 **The mezzanine.** An office floor over the east end
+      of the hall at 6 m, reached by a straight sixteen-step flight. See-through
+      at 13 per cent from below (the camera looks down through it at the racks)
+      and resolving to solid as you climb — driven by height, so it fades in on
+      the stairs rather than popping. Green resin walking surface. Three stub
+      offices: partitions, workstation desks with dead screens, chairs,
+      cabinets. Under it, the movement grew a second floor: `groundY` takes a
+      reference height and offers the deck and the stair ramp only when
+      stepping onto them is a step; blockers gained a `bottom` gate so rails
+      and desks at deck height do not wall off the aisles beneath; and walking
+      off an edge past 1.5 m converts to a fall rather than snapping down.
+      Beams block at all heights, like the posts in a real hall.
+- [x] **W-25** 2026-08-26 **The OS is a flavour.** `unix.js` is pure machinery;
+      everything site-specific — host, user, greeting, disk — lives in
+      `src/os-ncds.js`, and `newShell` refuses to start without a flavour. A
+      second datacentre running a different OS is a second flavour file.
+- [x] **W-26 → renumbered, see Open. W-25b** 2026-08-26 **The datacentre is a
+      spec.** `DC_SPEC` gathers footprint, height, wall colour, sign text, rack
+      grouping, mezzanine flag and terminal OS; `buildDatacentre(spec)` reads
+      only the spec. The world still holds one instance — extracting the
+      builder to a module for true multiples is part of W-18.
 
 - [x] **W-06** 2026-08-26 **Terminal access point.** A 2.3 m screen bolted to
       the rack row nearest the door, white on black at 56 × 20 so it reads as a

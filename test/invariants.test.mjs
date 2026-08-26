@@ -292,6 +292,30 @@ test('the rack blockers hold a standing pose clear of the face', () => {
   assert.ok(hd >= 1.4, `row blocker hd ${hd}: feet reach the face plane again`);
 });
 
+// ---- the mezzanine ----------------------------------------------------------
+
+test('the second floor is chosen by reference height, never unconditionally', () => {
+  // groundY once returned terrain only; the mezzanine adds candidates that are
+  // eligible only when stepping onto them from the caller's height is a step.
+  // A caller that passes no height must get the old ground answer, or every
+  // tree and rock under the deck would be planted six metres up.
+  assert.match(GAME, /function groundY\(x, z, refY\)/, 'groundY lost its reference height');
+  assert.match(GAME, /refY !== undefined/, 'the no-reference path must fall back to ground');
+  assert.match(GAME, /ry <= refY \+ STEP_UP/, 'the ramp must qualify by step height');
+});
+
+test('mezzanine blockers are gated below as well as above', () => {
+  // Rails and desks live at deck height; without a bottom gate they were
+  // invisible walls across the ground-floor aisles beneath them.
+  assert.match(GAME, /b\.bottom !== undefined && feetY < b\.bottom\) continue/,
+    'blocked() lost the bottom gate');
+});
+
+test('walking off an edge falls rather than teleports', () => {
+  assert.match(GAME, /pos\.y - gh > 1\.5\) \{ airborne = true/,
+    'the drop-to-fall conversion is gone; stepping off the deck snaps 6 m down');
+});
+
 // ---- the rack faces ---------------------------------------------------------
 
 test('there is more than one cabinet in the hall', () => {
